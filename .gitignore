@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+.venv/
+venv/
+*.sqlite3
+*.sqlite3-*
+*.migrating
+.env
+data/
+dist/

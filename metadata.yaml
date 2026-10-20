@@ -1,0 +1,12 @@
+name: astrbot_plugin_classnote
+display_name: 课笺 · ClassNote
+desc: 把课程记在笺上。导入 WakeUp 日历与分享课表，按实际课次主动提醒，沿用当前会话人格。
+short_desc: WakeUp 日历导入与有温度的 QQ 上课提醒。
+version: v0.2.0
+author: CREAM
+repo: https://github.com/azaleakita/astrbot_plugin_classnote
+support_platforms:
+  - aiocqhttp
+  - qq_official
+  - qq_official_webhook
+astrbot_version: ">=4.19.6,<5"

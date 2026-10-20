@@ -1,0 +1,19 @@
+{
+  "tableInfo": {"tableName": "示例课表（虚构，请勿直接当作个人课表使用）", "startDate": "2026-09-07"},
+  "timeList": [
+    {"node": 1, "startTime": "08:00", "endTime": "08:45"},
+    {"node": 2, "startTime": "08:55", "endTime": "09:40"},
+    {"node": 3, "startTime": "10:00", "endTime": "10:45"},
+    {"node": 4, "startTime": "10:55", "endTime": "11:40"}
+  ],
+  "courseInfos": [
+    {"id": 1, "courseName": "大学化学", "teacher": "示例教师甲"},
+    {"id": 2, "courseName": "物理实验", "teacher": "示例教师乙"},
+    {"id": 3, "courseName": "专题讲座", "teacher": "示例教师丙"}
+  ],
+  "courseDetails": [
+    {"id": 1, "day": 1, "startNode": 1, "step": 2, "startWeek": 1, "endWeek": 16, "type": 1, "room": "示例楼A201"},
+    {"id": 2, "day": 1, "startNode": 1, "step": 2, "startWeek": 1, "endWeek": 16, "type": 2, "room": "示例楼B301"},
+    {"id": 3, "day": 3, "startNode": 3, "step": 2, "weeks": [3, 7, 11], "room": "示例报告厅"}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "enabled": {"description": "启用自动提醒", "type": "bool", "default": true},
+  "admins_only": {"description": "仅允许AstrBot管理员使用课表指令", "type": "bool", "default": true},
+  "allow_group": {"description": "允许群内导入并向群内提醒本人", "type": "bool", "default": false},
+  "auto_import_ics": {"description": "直接接收.ics附件并导入", "type": "bool", "default": true, "hint": "关闭后先发/课表 导入日历，再在2分钟内发送文件。仍受管理员和群聊权限限制。"},
+  "timezone": {"description": "新课表默认时区", "type": "string", "default": "Asia/Shanghai", "hint": "已有课表保留导入时区；服务器系统时区不影响计算。"},
+  "default_lead_minutes": {"description": "新课表默认提前分钟数", "type": "list", "default": [20], "hint": "每项1至1440，最多3项。个人可以用/课表 提前覆盖。"},
+  "use_llm_persona": {"description": "使用当前会话人格生成提醒开头", "type": "bool", "default": true, "hint": "每次待投递提醒调用一次当前会话模型；仅注入人格及其预设对话，不读取日常聊天历史。"},
+  "fallback_opener": {"description": "模型不可用时的提醒开头", "type": "text", "default": "该准备去上课了，记得带齐需要的东西。", "hint": "请按bot人格修改。模型超时、异常时使用此句，课程和时间照常显示。"},
+  "catchup_seconds": {"description": "迟发容忍秒数", "type": "int", "default": 300, "hint": "范围30至900。重启后仅补发窗口内且尚未开始的课程；过期不刷屏。"}
+}
