@@ -466,6 +466,8 @@ class PluginContractTests(unittest.IsolatedAsyncioTestCase):
         self.context.send_message.assert_not_awaited()
 
     async def test_background_loop_deduplicates_across_ticks(self):
+        self.plugin.config["scheduler_mode"] = "polling"
+
         class FixedDateTime(datetime):
             @classmethod
             def now(cls, tz=None):
