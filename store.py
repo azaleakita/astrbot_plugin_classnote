@@ -39,7 +39,16 @@ class Store:
                 attempts INTEGER NOT NULL, updated REAL NOT NULL, error TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS delivery_binding ON deliveries(binding_id);
+            CREATE TABLE IF NOT EXISTS managed_tasks (
+                key TEXT PRIMARY KEY, binding_id TEXT NOT NULL, body TEXT NOT NULL
+            );
         """)
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(deliveries)")}
+        if "detail" not in columns:
+            self.db.execute(
+                "ALTER TABLE deliveries ADD COLUMN detail TEXT NOT NULL DEFAULT '{}'"
+            )
+            self.db.commit()
 
     def all(self):
         return [
@@ -75,13 +84,18 @@ class Store:
         with self.db:
             self.db.execute("DELETE FROM bindings WHERE id=?", (binding_id,))
             self.db.execute("DELETE FROM deliveries WHERE binding_id=?", (binding_id,))
+            self.db.execute(
+                "DELETE FROM managed_tasks WHERE binding_id=?", (binding_id,)
+            )
 
-    def claim(self, key, binding_id, now):
+    def claim(self, key, binding_id, now, detail=None):
         """Retry transient failures, at most three attempts and no duplicate live claim."""
         with self.db:
             self.db.execute(
-                "INSERT OR IGNORE INTO deliveries VALUES (?, ?, 'pending', 0, 0, '')",
-                (key, binding_id),
+                "INSERT OR IGNORE INTO deliveries "
+                "(id,binding_id,state,attempts,updated,error,detail) "
+                "VALUES (?, ?, 'pending', 0, 0, '', ?)",
+                (key, binding_id, json.dumps(detail or {}, ensure_ascii=False)),
             )
             cursor = self.db.execute(
                 "UPDATE deliveries SET state='sending', attempts=attempts+1, updated=? "
@@ -105,6 +119,53 @@ class Store:
             "ORDER BY updated DESC LIMIT 1",
             (binding_id,),
         ).fetchone()
+
+    def delivery(self, key):
+        row = self.db.execute(
+            "SELECT state,attempts,updated,error FROM deliveries WHERE id=?", (key,)
+        ).fetchone()
+        return (
+            dict(zip(("state", "attempts", "updated", "error"), row)) if row else None
+        )
+
+    def records(self, binding_id=None, limit=50):
+        where, args = (" WHERE binding_id=?", [binding_id]) if binding_id else ("", [])
+        rows = self.db.execute(
+            "SELECT id,binding_id,state,attempts,updated,error,detail FROM deliveries"
+            + where
+            + " ORDER BY updated DESC LIMIT ?",
+            (*args, limit),
+        )
+        return [
+            {
+                **dict(
+                    zip(
+                        ("key", "binding_id", "state", "attempts", "updated", "error"),
+                        row[:6],
+                    )
+                ),
+                "detail": json.loads(row[6]),
+            }
+            for row in rows
+        ]
+
+    def tasks(self):
+        return {
+            row[0]: json.loads(row[1])
+            for row in self.db.execute("SELECT key,body FROM managed_tasks")
+        }
+
+    def save_task(self, key, body):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO managed_tasks VALUES (?, ?, ?) ON CONFLICT(key) "
+                "DO UPDATE SET binding_id=excluded.binding_id,body=excluded.body",
+                (key, body["binding_id"], json.dumps(body, ensure_ascii=False)),
+            )
+
+    def forget_task(self, key):
+        with self.db:
+            self.db.execute("DELETE FROM managed_tasks WHERE key=?", (key,))
 
     def prune(self, now):
         with self.db:

@@ -1,0 +1,8 @@
+{
+  "views": {
+    "classnote": {
+      "title": "课表管理",
+      "description": "查看每周课表、导入 WakeUp 日历，管理人格提醒与 AstrBot 未来任务。"
+    }
+  }
+}

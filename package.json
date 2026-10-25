@@ -1,0 +1,11 @@
+{
+  "name": "classnote-ui-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:ui": "node --test tests/ui.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}

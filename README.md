@@ -1,14 +1,14 @@
 <p align="center"><img src="docs/assets/hero.svg" alt="课笺 ClassNote · 让每一次上课，都有一句温柔的提醒" width="100%" /></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-a58bc7?style=flat-square" alt="version 0.2.0" />
-  <img src="https://img.shields.io/badge/AstrBot-%E2%89%A54.19.6-75629a?style=flat-square" alt="AstrBot >=4.19.6" />
+  <img src="https://img.shields.io/badge/version-0.3.0-a58bc7?style=flat-square" alt="version 0.3.0" />
+  <img src="https://img.shields.io/badge/AstrBot-%E2%89%A54.29.3-75629a?style=flat-square" alt="AstrBot >=4.29.3" />
   <img src="https://img.shields.io/badge/Python-3.11%2B-5a718b?style=flat-square" alt="Python 3.11+" />
   <img src="https://img.shields.io/badge/iCalendar-ICS-b38d9f?style=flat-square" alt="iCalendar ICS" />
   <img src="https://img.shields.io/badge/license-MIT-8b8198?style=flat-square" alt="MIT license" />
 </p>
 
-<p align="center"><b>把课程记在笺上，把提醒留给熟悉的声音。</b><br />WakeUp 课表导入 · QQ 主动提醒 · 单双周与调课 · 当前会话人格</p>
+<p align="center"><b>把课程记在笺上，把提醒留给熟悉的声音。</b><br />可视化课表 · AstrBot 未来任务 · WakeUp 导入 · 当前会话人格</p>
 
 <p align="center"><a href="#快速开始">快速开始</a> · <a href="#导入你的课表">导入课表</a> · <a href="#常用指令">指令一览</a> · <a href="docs/INSTALL.md">安装与升级</a> · <a href="DESIGN.md">开发设计</a></p>
 
@@ -22,6 +22,8 @@
 
 | 能力 | 你会得到的体验 |
 | --- | --- |
+| 可视化管理 | 在 AstrBot 插件视图中查看一周课表，预览导入、停调课、修改提醒和查看投递记录 |
+| AstrBot 未来任务 | 为未来 7 天每次提醒建立一次性任务，自动续排，可在原生任务页中查看与暂停 |
 | WakeUp 日历文件 | 直接发送 `.ics` 或 `.ical` 文件即可导入，不依赖分享口令继续有效 |
 | 每周不同的课程 | 支持重复规则、单双周、非连续日期和例外日期，按实际课次提醒 |
 | 日历中的调课 | 识别 `EXDATE`、`RDATE`、`RECURRENCE-ID` 与取消状态 |
@@ -31,11 +33,11 @@
 
 ## 快速开始
 
-**环境：AstrBot >=4.19.6、<5；Python >=3.11；已接入能够主动发送消息的 QQ 适配器。**
+**环境：AstrBot >=4.29.3、<5；Python >=3.11；已接入能够主动发送消息的 QQ 适配器。**
 
 1. 在 AstrBot 插件管理中从 `https://github.com/azaleakita/astrbot_plugin_classnote` 安装，或将仓库文件放进 `data/plugins/astrbot_plugin_classnote/`。
 2. 重载插件，确认自己的 QQ 账号已加入 AstrBot 管理员。默认只开放管理员私聊使用。
-3. 在 WakeUp 中选择“导出为日历文件”，将导出的 `.ics` **作为文件附件**发送给 bot。
+3. 打开 **插件 → 课笺 → 课表管理**，点击“导入课表”，选择已有 QQ 会话，上传 WakeUp 导出的 `.ics`，先预览再确认。也可以直接将 `.ics` **作为文件附件**发送给 bot。
 
 然后用下面两条指令核对：
 
@@ -45,6 +47,35 @@
 ```
 
 “下次”展示接下来的计划提醒；“测试”使用正式提醒的主动投递和人格接口，不消耗正式提醒记录。
+
+## 可视化课表管理
+
+`v0.3.0` 随插件提供官方 `views/classnote/` 视图，无需额外启动网页服务或构建前端。重载插件后，在插件详情中打开“课表管理”；支持侧边栏视图入口、桌面与窄屏布局，以及跟随 AstrBot 的浅色 / 深色主题。
+
+| 页面 | 可以做什么 |
+| --- | --- |
+| 课表总览 | 切换不同持有者的课表，翻周查看课程，暂停、开启、测试、设置提前量、停课调课、导出 ICS |
+| 提醒计划 | 查看原生一次性任务、提醒时间和状态，暂停单次提醒，手动同步、恢复已删除任务 |
+| 投递记录 | 查看当前课表最近 50 次正式投递的状态、尝试次数和错误类型 |
+| 插件设置 | 切换调度模式，设置默认时区、提前量、补发窗口、人格开头及使用范围 |
+
+导入支持日历文件、分享文本和 WakeUp 备份；确认前会显示课次、范围、投递地与解析提示。页面通过 AstrBot 的 bridge 和认证接口通信，不存储 Dashboard 密码或令牌。管理员在页面中可以管理全部课表；QQ 指令仍按会话、发送者和插件权限隔离。
+
+详细操作与排查见 [可视化管理与未来任务](docs/WEBUI.md)。
+
+## 使用 AstrBot「未来任务」提醒
+
+默认 `scheduler_mode=future_tasks`，每次课程提前提醒都对应一个**带真实日期的一次性任务**，任务名以“课笺 ·”开头。采用 AstrBot `CronJobManager` 的基础回调任务，按时调用插件的统一投递流程；人格、精确课程信息、重试和去重仍由课笺处理，不需要让 Agent 猜测课表或调用工具创建任务。
+
+- 滚动安排未来 7 天，后台每 30 秒检查续排；导入、停调课、暂停、修改提前量后立即同步。
+- 同一门课设置 30、10 分钟提醒时，会生成两项独立的一次性任务。单双周、非连续日期和例外仍按实际课次展开。
+- 可在课笺“提醒计划”或 AstrBot 原生“未来任务”中暂停单项任务；手动删除的任务不会被自动建回来，需要时点击“恢复已删除的任务”。
+- 原生任务的时间请勿单独编辑，改课请使用课笺设置，避免和课程事实不一致。
+- 插件重载时只清理并重新绑定自己管理的任务，保留单项暂停状态；不修改其他插件或手动创建的任务。
+- 可切换 `scheduler_mode=polling` 使用原有每 10 秒轮询；两种模式共享 SQLite 投递记录，切换不会重发已成功的提醒。
+- 未来任务回调最多并行 4 条；每张课表预排最多 200 项，全部课表合计最多 1000 项。触及上限时页面提示，剩余任务随时间推进续排。
+
+AstrBot 必须在线。一次性任务执行失败后由 AstrBot 移除，课笺会在补发窗口内通过新任务进行有限重试；同一提醒最多尝试 3 次。全局关闭、单课表暂停和群聊权限均在执行前重新核对。
 
 ## 导入你的课表
 
@@ -128,12 +159,17 @@ WakeUp Android/鸿蒙版导出日历默认带提前 20 分钟提醒。新订阅�
 
 文件上限 2 MiB，原始事件最多 2000 条，展开最多 10000 课次，整体跨度最多 550 天。只接收带精确起止时间的有限课程；全天事件、无限重复、小时/分钟级重复、无效时间和未知时区会明确拒绝。主要面向 `Asia/Shanghai`，夏令时切换未专项验证。
 
-当前 **52 项离线测试通过**，覆盖重复规则、例外、时区、附件读取到入库、日历闹钟与手动提前量、旧数据迁移，以及原有调度、人设、重试和去重。SDK 契约测试使用替身；尚未在用户真实 WakeUp 文件和 QQ 实例上完成联调。
+当前 **76 项 Python 离线测试与 14 项页面交互测试通过**，覆盖日历解析、原有调度与人格、原生任务续排 / 去重 / 重启 / 重试，以及管理页导入、设置、任务开关和错误状态。另用 AstrBot 4.29.3 当前官方 `CronJobManager` 与 Web API helper 进行了本地契约检查；未在用户真实 QQ 实例和完整 AstrBot WebUI 中完成部署联调。页面交互测试使用 jsdom，不等同于真实浏览器视觉验证。
 
 ```bash
 # 在插件目录的父目录运行
 python -m pip install -r astrbot_plugin_classnote/requirements.txt
 python -m unittest discover -s astrbot_plugin_classnote/tests -v
+
+# 可选：仅开发页面测试需要 Node.js，插件运行不需要
+cd astrbot_plugin_classnote
+npm ci --ignore-scripts
+npm run test:ui
 ```
 
 附有 [虚构日历样例](examples/wakeup-demo.ics)、[变更记录](CHANGELOG.md)、[设计说明](DESIGN.md) 和自动测试工作流。

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>课笺 · 课表管理</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <svg viewBox="0 0 32 36" aria-hidden="true">
+            <path d="M7 3h13l6 6v24H7zM20 3v7h6M12 16h9M12 22h6" />
+          </svg>
+          <div>
+            <strong>课笺<span>ClassNote</span></strong
+            ><small>把课程记在笺上</small>
+          </div>
+        </div>
+        <div class="top-actions">
+          <span id="connection" class="chip">正在连接</span
+          ><button
+            id="refresh"
+            class="icon-button"
+            aria-label="刷新数据"
+            title="刷新数据"
+          >
+            ↻</button
+          ><button id="open-import" class="primary">＋ 导入课表</button>
+        </div>
+      </header>
+      <div id="banner" class="banner" role="alert" hidden></div>
+      <div id="loading" class="loading" role="status">
+        <span class="spinner"></span> 正在展开你的课笺…
+      </div>
+      <main id="app" hidden>
+        <section class="intro">
+          <div>
+            <div class="eyebrow">YOUR CAMPUS, ON TIME</div>
+            <h1>每一堂课，都从容一点。</h1>
+            <p>看清这一周，也让熟悉的声音提醒你出发。</p>
+          </div>
+          <div class="intro-note">
+            <span class="status-dot"></span
+            ><span id="engine-label">未来任务</span
+            ><small id="sync-label"></small>
+          </div>
+        </section>
+        <div class="workspace-bar">
+          <label class="schedule-select"
+            ><span>当前课表</span
+            ><select id="binding-select" aria-label="选择课表"></select
+          ></label>
+          <div id="binding-tools" class="actions">
+            <button id="toggle-binding" class="secondary">暂停提醒</button
+            ><button id="configure-binding" class="secondary">提醒设置</button
+            ><button id="test-binding" class="quiet">发送测试</button
+            ><button id="export-binding" class="quiet">导出 ICS</button
+            ><button id="delete-binding" class="quiet danger-text">删除</button>
+          </div>
+        </div>
+        <nav class="tabs" aria-label="课笺管理导航">
+          <button data-tab="overview" class="active" aria-current="page">
+            课表总览</button
+          ><button data-tab="plans">
+            提醒计划 <span id="plan-count" class="count">0</span></button
+          ><button data-tab="records">投递记录</button
+          ><button data-tab="settings">插件设置</button>
+        </nav>
+        <section id="tab-overview" class="tab-panel">
+          <div id="empty" class="empty panel" hidden>
+            <div class="empty-symbol">笺</div>
+            <h2>新的一周，从一张课表开始。</h2>
+            <p>导入 WakeUp 日历或分享课表，课程和提醒会自动排好。</p>
+            <button class="primary" data-open-import>导入第一张课表</button
+            ><small
+              >先在目标 QQ 会话与 bot 对话，即可在导入时选择投递地。</small
+            >
+          </div>
+          <div id="overview-content">
+            <div id="stats" class="stats"></div>
+            <section class="panel calendar-panel">
+              <div class="section-heading">
+                <div>
+                  <h2>一周课程</h2>
+                  <p id="week-label"></p>
+                </div>
+                <div class="actions week-actions">
+                  <button
+                    id="previous-week"
+                    class="icon-button"
+                    aria-label="上一周"
+                  >
+                    ‹</button
+                  ><button id="current-week" class="secondary">本周</button
+                  ><button
+                    id="next-week"
+                    class="icon-button"
+                    aria-label="下一周"
+                  >
+                    ›</button
+                  ><button id="open-override" class="secondary">
+                    停课 / 调课
+                  </button>
+                </div>
+              </div>
+              <div class="calendar-scroll">
+                <div id="calendar" class="calendar"></div>
+              </div>
+              <div class="calendar-footer">
+                <span id="destination"></span
+                ><span>日历是导入时的快照，改课后请重新导入。</span>
+              </div>
+            </section>
+            <div id="next-card" class="panel next-card"></div>
+          </div>
+        </section>
+        <section id="tab-plans" class="tab-panel" hidden>
+          <div class="panel">
+            <div class="section-heading">
+              <div>
+                <h2>提醒计划</h2>
+                <p id="plans-subtitle">每个提醒都对应真实的上课日期。</p>
+              </div>
+              <div class="actions">
+                <button id="resync" class="secondary">同步未来任务</button
+                ><button id="regenerate" class="quiet">恢复已删除的任务</button>
+              </div>
+            </div>
+            <div id="task-notice" class="notice"></div>
+            <div id="plans-list"></div>
+          </div>
+        </section>
+        <section id="tab-records" class="tab-panel" hidden>
+          <div class="panel">
+            <div class="section-heading">
+              <div>
+                <h2>投递记录</h2>
+                <p>当前课表最近 50 次正式投递；测试提醒不计入记录。</p>
+              </div>
+            </div>
+            <div id="records-list"></div>
+          </div>
+        </section>
+        <section id="tab-settings" class="tab-panel" hidden>
+          <form id="settings-form" class="settings-layout">
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <h2>提醒与调度</h2>
+                  <p>切换调度方式后自动清理课笺生成的旧任务。</p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label
+                  >调度方式<select name="scheduler_mode">
+                    <option value="future_tasks">
+                      AstrBot 未来任务 · 推荐
+                    </option>
+                    <option value="polling">插件轮询 · 每 10 秒</option></select
+                  ><small
+                    >未来任务为每次提醒建立一次性任务，滚动安排未来 7
+                    天。</small
+                  ></label
+                ><label
+                  >新课表默认时区<input
+                    name="timezone"
+                    placeholder="Asia/Shanghai"
+                    required
+                  /><small
+                    >已有课表保持原时区；页面中的时间均按课表时区显示。</small
+                  ></label
+                ><label
+                  >默认提前分钟数<input
+                    name="default_lead_minutes"
+                    placeholder="20 或 30,10"
+                    required
+                  /><small
+                    >1–1440 分钟，最多 3 个；日历自带提醒或个人设置优先。</small
+                  ></label
+                ><label
+                  >迟发容忍秒数<input
+                    name="catchup_seconds"
+                    type="number"
+                    min="30"
+                    max="900"
+                    required
+                  /><small>只补发窗口内且课程尚未开始的提醒。</small></label
+                >
+              </div>
+              <label class="switch-row"
+                ><span
+                  ><strong>启用自动提醒</strong
+                  ><small>关闭后保留课表，暂停所有正式提醒。</small></span
+                ><input type="checkbox" name="enabled" class="switch"
+              /></label>
+            </section>
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <h2>熟悉的语气</h2>
+                  <p>读取目标会话当前生效的人格与模型。</p>
+                </div>
+              </div>
+              <label class="switch-row"
+                ><span
+                  ><strong>使用 bot 人格</strong
+                  ><small
+                    >每次提醒生成一句开头，课程、时间与地点由程序追加。</small
+                  ></span
+                ><input
+                  type="checkbox"
+                  name="use_llm_persona"
+                  class="switch" /></label
+              ><label
+                >备用提醒开头<textarea
+                  name="fallback_opener"
+                  rows="3"
+                  maxlength="100"
+                  required
+                ></textarea
+                ><small
+                  >模型超时、不可用或关闭人格生成时使用，可按 bot
+                  的风格填写。</small
+                ></label
+              >
+            </section>
+            <section class="panel">
+              <div class="section-heading">
+                <div>
+                  <h2>使用范围</h2>
+                  <p>这些设置同时约束 QQ 指令和自动提醒。</p>
+                </div>
+              </div>
+              <label class="switch-row"
+                ><span><strong>仅管理员可使用 QQ 指令</strong></span
+                ><input
+                  type="checkbox"
+                  name="admins_only"
+                  class="switch" /></label
+              ><label class="switch-row"
+                ><span
+                  ><strong>允许群聊课表</strong
+                  ><small>在导入的群中提醒，只 @ 该课表的导入者。</small></span
+                ><input
+                  type="checkbox"
+                  name="allow_group"
+                  class="switch" /></label
+              ><label class="switch-row"
+                ><span
+                  ><strong>直接导入日历附件</strong
+                  ><small>关闭后，在 QQ 先发送 /课表 导入日历。</small></span
+                ><input type="checkbox" name="auto_import_ics" class="switch"
+              /></label>
+            </section>
+            <div class="save-bar">
+              <span>设置保存后立即生效；管理员可在此管理全部课表。</span
+              ><button type="submit" class="primary">保存设置</button>
+            </div>
+          </form>
+        </section>
+        <footer>
+          课笺 · ClassNote <span id="version">v0.3.0</span
+          ><span>准时提醒，也保留你的节奏。</span>
+        </footer>
+      </main>
+    </div>
+    <dialog id="modal">
+      <div class="dialog-top">
+        <h2 id="modal-title"></h2>
+        <button id="close-modal" class="icon-button" aria-label="关闭弹窗">
+          ×
+        </button>
+      </div>
+      <div id="modal-body"></div>
+    </dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

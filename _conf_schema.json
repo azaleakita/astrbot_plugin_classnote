@@ -1,5 +1,6 @@
 {
   "enabled": {"description": "启用自动提醒", "type": "bool", "default": true},
+  "scheduler_mode": {"description": "提醒调度方式", "type": "string", "default": "future_tasks", "options": ["future_tasks", "polling"], "hint": "future_tasks：在 AstrBot 未来任务中滚动安排未来7天的一次性课程提醒；polling：插件每10秒检查。切换后共用投递去重记录。请勿手动修改生成任务的时间，改课请到课笺管理页。"},
   "admins_only": {"description": "仅允许AstrBot管理员使用课表指令", "type": "bool", "default": true},
   "allow_group": {"description": "允许群内导入并向群内提醒本人", "type": "bool", "default": false},
   "auto_import_ics": {"description": "直接接收.ics附件并导入", "type": "bool", "default": true, "hint": "关闭后先发/课表 导入日历，再在2分钟内发送文件。仍受管理员和群聊权限限制。"},

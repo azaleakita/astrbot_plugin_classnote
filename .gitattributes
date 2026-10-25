@@ -1,1 +1,1 @@
-*.ics text eol=crlf whitespace=cr-at-eol
+*.ics -text whitespace=cr-at-eol

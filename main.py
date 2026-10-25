@@ -29,6 +29,7 @@ from .core import (
     parse_timetable,
     teaching_week,
 )
+from .future_tasks import FutureTasks
 from .ics import parse_calendar
 from .persona import generate_opener
 from .store import Store, migrate_legacy_database
@@ -55,7 +56,7 @@ WakeUp导入是课表快照，App后续修改需重新分享导入。"""
     "astrbot_plugin_classnote",
     "CREAM",
     "课笺：WakeUp日历与分享课表提醒，沿用当前会话人格",
-    "0.2.0",
+    "0.3.0",
 )
 class ClassNote(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -65,17 +66,30 @@ class ClassNote(Star):
         self.http = None
         self.task = None
         self.send_lock = asyncio.Lock()
+        self.delivery_semaphore = asyncio.Semaphore(4)
         self.pending_imports = {}
+        self.future_tasks = FutureTasks(self)
+        if callable(getattr(context, "register_web_api", None)):
+            from .webui import Dashboard
+
+            self.dashboard = Dashboard(self)
+            self.dashboard.register()
 
     async def initialize(self):
         zone = str(self.config.get("timezone", "Asia/Shanghai"))
         ZoneInfo(zone)  # Invalid configuration must fail visibly at load time.
         self._lead(self.config.get("default_lead_minutes", [20]))
         bounded_int(self.config.get("catchup_seconds", 300), 30, 900, "补发窗口")
+        if self.config.get("scheduler_mode", "future_tasks") not in (
+            "future_tasks",
+            "polling",
+        ):
+            raise TimetableError("scheduler_mode 必须为 future_tasks 或 polling。")
         database = migrate_legacy_database(get_astrbot_data_path())
         self.store = Store(database)
         self.http = aiohttp.ClientSession()
-        self.task = asyncio.create_task(self._run(), name="wakeup-reminder-loop")
+        await self._sync_future(rebind=True)
+        self.task = asyncio.create_task(self._run(), name="classnote-reminder-loop")
 
     async def terminate(self):
         if self.task:
@@ -85,7 +99,19 @@ class ClassNote(Star):
         if self.http:
             await self.http.close()
         if self.store:
+            try:
+                await self.future_tasks.close()
+            except Exception as exc:
+                logger.warning(f"[classnote] task cleanup failed: {type(exc).__name__}")
             self.store.close()
+
+    async def _sync_future(self, **options):
+        if not self.store:
+            return
+        try:
+            await self.future_tasks.sync(**options)
+        except Exception as exc:
+            logger.warning(f"[classnote] future task sync failed: {type(exc).__name__}")
 
     def _binding_id(self, event):
         return digest([event.unified_msg_origin, str(event.get_sender_id())])
@@ -244,6 +270,7 @@ class ClassNote(Star):
         if action == "删除":
             async with self.send_lock:
                 self.store.delete(self._binding_id(event))
+            await self._sync_future()
             return "已删除你在当前会话的课表及提醒记录。"
         binding = self._get_binding(event)
         now = datetime.now(ZoneInfo(binding["timezone"]))
@@ -267,6 +294,8 @@ class ClassNote(Star):
                 f"默认提前{binding['lead_minutes']}分钟；时区{binding['timezone']}\n"
                 f"提醒来源：{'日历自带，缺失时使用默认值' if calendar and not binding.get('custom_lead', False) else '插件设置'}\n"
                 f"最近投递：{latest}\n日期覆盖：{json.dumps(binding['overrides'], ensure_ascii=False)}"
+                + f"\n调度：{'AstrBot 未来任务' if self.config.get('scheduler_mode', 'future_tasks') == 'future_tasks' else '插件轮询'}"
+                + (f"\n{self.future_tasks.error}" if self.future_tasks.error else "")
             )
         if action in ("今日", "明日", "本周"):
             first = now.date() + timedelta(days=1 if action == "明日" else 0)
@@ -339,6 +368,7 @@ class ClassNote(Star):
             else:
                 return HELP
             self.store.save(binding)
+        await self._sync_future()
         return "已更新。发送 /课表 下次 或 /课表 本周 可核对新安排。"
 
     async def _save_schedule(self, event, schedule):
@@ -379,6 +409,7 @@ class ClassNote(Star):
             else f"提前{','.join(map(str, binding['lead_minutes']))}分钟提醒。"
         )
         notice = "\n" + "\n".join(schedule["warnings"]) if schedule["warnings"] else ""
+        await self._sync_future()
         return (
             f"课笺已收好《{schedule['name']}》，共{len(schedule['courses'])}{unit}。\n"
             f"{date_info}\n时区：{binding['timezone']}；当前{'开启' if binding['enabled'] else '暂停'}。\n"
@@ -443,8 +474,41 @@ class ClassNote(Star):
                 raise RuntimeError("destination_platform_unavailable")
         return True
 
+    async def _deliver(self, binding, item):
+        now = datetime.now(timezone.utc)
+        grace = bounded_int(
+            self.config.get("catchup_seconds", 300), 30, 900, "补发窗口"
+        )
+        if (
+            now < item["fire"]
+            or now >= item["begin"]
+            or (now - item["fire"]).total_seconds() > grace
+        ):
+            return False
+        detail = {
+            "name": item["name"],
+            "fire": item["fire"].isoformat(),
+            "begin": item["begin"].isoformat(),
+            "room": item["room"],
+        }
+        if not self.store.claim(item["key"], binding["id"], now.timestamp(), detail):
+            return False
+        try:
+            sent = await self._send(binding, item)
+            self.store.finish(
+                item["key"], datetime.now().timestamp(), "sent" if sent else "failed"
+            )
+            return sent
+        except Exception as exc:
+            self.store.finish(
+                item["key"], datetime.now().timestamp(), "failed", type(exc).__name__
+            )
+            logger.warning(f"[classnote] delivery failed: {type(exc).__name__}")
+            return False
+
     async def _run(self):
         last_prune = 0.0
+        last_sync = 0.0
         while True:
             try:
                 now = datetime.now(timezone.utc)
@@ -457,43 +521,20 @@ class ClassNote(Star):
 
                 async def process(binding, item):
                     async with semaphore:
-                        # Do not claim until a worker can actually run.
-                        current = datetime.now(timezone.utc)
-                        if (
-                            current >= item["begin"]
-                            or (current - item["fire"]).total_seconds() > grace
-                        ):
-                            return
-                        if not self.store.claim(
-                            item["key"], binding["id"], current.timestamp()
-                        ):
-                            return
-                        try:
-                            sent = await self._send(binding, item)
-                            self.store.finish(
-                                item["key"],
-                                datetime.now().timestamp(),
-                                "sent" if sent else "failed",
-                            )
-                        except Exception as exc:
-                            self.store.finish(
-                                item["key"],
-                                datetime.now().timestamp(),
-                                "failed",
-                                type(exc).__name__,
-                            )
-                            logger.warning(
-                                f"[classnote] delivery failed: {type(exc).__name__}"
-                            )
+                        await self._deliver(binding, item)
 
                 work = [
                     process(b, item)
                     for b in bindings
                     if self._active(b)
+                    and self.config.get("scheduler_mode", "future_tasks") == "polling"
                     for item in due_reminders(b, now, grace)
                 ]
                 if work:
                     await asyncio.gather(*work)
+                if stamp - last_sync >= 30:
+                    await self._sync_future()
+                    last_sync = stamp
                 if stamp - last_prune > 86400:
                     self.store.prune(stamp)
                     last_prune = stamp
