@@ -205,13 +205,28 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.future.jobs), 1)
         self.assertIn("2026-11-02", self.future.jobs[0].payload["begin"])
 
-    async def test_missing_api_is_explicit_without_falling_back_and_duplicating(self):
-        self.future.manager = None
-        with self.assertRaises(RuntimeError):
-            await self.future.sync()
+    async def test_missing_api_uses_polling_and_recovers_when_manager_appears(self):
+        self.plugin.context.cron_manager = None
+        await self.future.sync()
         self.assertFalse(self.future.status()["available"])
-        self.assertIn("升级", self.future.error)
-        self.plugin.context.send_message.assert_not_awaited()
+        self.assertEqual(self.future.status()["mode"], "polling")
+        self.assertIn("轮询", self.future.error)
+        Clock.instant = datetime(2026, 10, 25, 23, 40, tzinfo=timezone.utc)
+        from astrbot_plugin_classnote.core import due_reminders
+
+        item = due_reminders(self.b, Clock.instant)[0]
+        await self.plugin._deliver(self.b, item)
+        self.plugin.context.send_message.assert_awaited_once()
+        self.plugin.context.cron_manager = self.manager
+        await self.future.sync()
+        self.assertEqual(self.future.status()["mode"], "future_tasks")
+        self.assertFalse(self.future.error)
+        self.assertTrue(
+            all(
+                job.payload["key"] != item["key"]
+                for job in await self.manager.list_jobs()
+            )
+        )
 
     async def test_factory_failure_cleans_disabled_partial_job(self):
         self.manager.update_job = AsyncMock(side_effect=RuntimeError("write failed"))
@@ -403,10 +418,48 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status_code"], 503)
         self.plugin.store = store
 
+    async def test_missing_web_sdk_does_not_break_core_plugin(self):
+        self.context.register_web_api = lambda *args: None
+        with patch.dict(sys.modules, {"astrbot_plugin_classnote.webui": None}):
+            self.plugin._setup_dashboard()
+        self.assertIsNone(self.plugin.dashboard)
+        self.assertIn("QQ", self.plugin.dashboard_error)
+        self.assertIsNotNone(self.plugin.store.get(self.b["id"]))
+
+    async def test_failed_registration_rolls_back_only_own_routes(self):
+        foreign = ("/foreign", lambda: None, ["GET"], "Foreign")
+        self.context.registered_web_apis = [foreign]
+
+        def register(*args):
+            self.context.registered_web_apis.append(args)
+            if len(self.context.registered_web_apis) == 3:
+                raise RuntimeError("registration failed")
+
+        self.context.register_web_api = register
+        with patch.dict(sys.modules, {"astrbot_plugin_classnote.webui": self.web}):
+            self.plugin._setup_dashboard()
+        self.assertIsNone(self.plugin.dashboard)
+        self.assertEqual(self.context.registered_web_apis, [foreign])
+
+    async def test_dashboard_unload_removes_routes_and_accepts_context_only_constructor(
+        self,
+    ):
+        plugin = self.main.ClassNote(self.context)
+        self.assertEqual(plugin.config, {})
+        self.context.registered_web_apis = []
+        self.context.register_web_api = lambda *args: (
+            self.context.registered_web_apis.append(args)
+        )
+        with patch.dict(sys.modules, {"astrbot_plugin_classnote.webui": self.web}):
+            self.plugin._setup_dashboard()
+        self.assertEqual(len(self.context.registered_web_apis), 7)
+        self.plugin.dashboard.close()
+        self.assertEqual(self.context.registered_web_apis, [])
+
     async def test_foreign_task_cannot_be_modified(self):
         manager = NativeManager()
         manager.jobs["foreign"] = types.SimpleNamespace(job_id="foreign", payload={})
-        self.plugin.future_tasks.manager = manager
+        self.plugin.context.cron_manager = manager
         self.payload({"operation": "toggle", "id": "foreign", "enabled": False})
         with self.assertRaises(TimetableError):
             await self.dashboard.tasks()

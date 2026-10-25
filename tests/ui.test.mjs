@@ -58,7 +58,7 @@ function fixture() {
     ],
   };
   return {
-    version: "0.3.0",
+    version: "0.3.1",
     bindings: [b],
     selected: b,
     records: [],
@@ -268,6 +268,15 @@ test("backend failure is visible and keeps a retry control", async (t) => {
   assert.match($("banner").textContent, /测试加载错误/);
   assert.equal($("loading").hidden, true);
   assert.equal($("refresh").disabled, false);
+});
+test("scheduler fallback displays the active polling mode", async (t) => {
+  const data = fixture();
+  data.scheduler.available = false;
+  data.scheduler.mode = "polling";
+  data.scheduler.error = "已自动使用插件轮询提醒。";
+  const { $ } = await setup(t, { data });
+  assert.equal($("engine-label").textContent, "插件轮询");
+  assert.match($("banner").textContent, /轮询/);
 });
 test("opening outside AstrBot explains the missing bridge", async (t) => {
   const { $ } = await setup(t, { connected: false });
