@@ -56,12 +56,12 @@ WakeUp导入是课表快照，App后续修改需重新分享导入。"""
     "astrbot_plugin_classnote",
     "CREAM",
     "课笺：WakeUp日历与分享课表提醒，沿用当前会话人格",
-    "0.3.0",
+    "0.3.1",
 )
 class ClassNote(Star):
-    def __init__(self, context: Context, config: AstrBotConfig):
+    def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
-        self.config = config
+        self.config = config if config is not None else {}
         self.store = None
         self.http = None
         self.task = None
@@ -69,11 +69,28 @@ class ClassNote(Star):
         self.delivery_semaphore = asyncio.Semaphore(4)
         self.pending_imports = {}
         self.future_tasks = FutureTasks(self)
-        if callable(getattr(context, "register_web_api", None)):
+        self.dashboard = None
+        self.dashboard_error = ""
+
+    def _setup_dashboard(self):
+        if not callable(getattr(self.context, "register_web_api", None)):
+            self.dashboard_error = (
+                "当前 AstrBot 不支持插件页面接口；QQ 课表和提醒仍可用。"
+            )
+            return
+        try:
             from .webui import Dashboard
 
             self.dashboard = Dashboard(self)
             self.dashboard.register()
+        except Exception as exc:
+            if self.dashboard:
+                self.dashboard.close()
+            self.dashboard = None
+            self.dashboard_error = "管理页未启用，请检查日志；QQ 课表和提醒仍可用。"
+            logger.warning(
+                f"[classnote] dashboard unavailable: {type(exc).__name__}: {exc}"
+            )
 
     async def initialize(self):
         zone = str(self.config.get("timezone", "Asia/Shanghai"))
@@ -88,10 +105,14 @@ class ClassNote(Star):
         database = migrate_legacy_database(get_astrbot_data_path())
         self.store = Store(database)
         self.http = aiohttp.ClientSession()
+        self._setup_dashboard()
         await self._sync_future(rebind=True)
         self.task = asyncio.create_task(self._run(), name="classnote-reminder-loop")
 
     async def terminate(self):
+        if self.dashboard:
+            self.dashboard.close()
+            self.dashboard = None
         if self.task:
             self.task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -104,6 +125,7 @@ class ClassNote(Star):
             except Exception as exc:
                 logger.warning(f"[classnote] task cleanup failed: {type(exc).__name__}")
             self.store.close()
+            self.store = None
 
     async def _sync_future(self, **options):
         if not self.store:
@@ -294,8 +316,9 @@ class ClassNote(Star):
                 f"默认提前{binding['lead_minutes']}分钟；时区{binding['timezone']}\n"
                 f"提醒来源：{'日历自带，缺失时使用默认值' if calendar and not binding.get('custom_lead', False) else '插件设置'}\n"
                 f"最近投递：{latest}\n日期覆盖：{json.dumps(binding['overrides'], ensure_ascii=False)}"
-                + f"\n调度：{'AstrBot 未来任务' if self.config.get('scheduler_mode', 'future_tasks') == 'future_tasks' else '插件轮询'}"
+                + f"\n调度：{'AstrBot 未来任务' if self.future_tasks.effective_mode == 'future_tasks' else '插件轮询'}"
                 + (f"\n{self.future_tasks.error}" if self.future_tasks.error else "")
+                + (f"\n{self.dashboard_error}" if self.dashboard_error else "")
             )
         if action in ("今日", "明日", "本周"):
             first = now.date() + timedelta(days=1 if action == "明日" else 0)
@@ -526,8 +549,7 @@ class ClassNote(Star):
                 work = [
                     process(b, item)
                     for b in bindings
-                    if self._active(b)
-                    and self.config.get("scheduler_mode", "future_tasks") == "polling"
+                    if self._active(b) and self.future_tasks.effective_mode == "polling"
                     for item in due_reminders(b, now, grace)
                 ]
                 if work:

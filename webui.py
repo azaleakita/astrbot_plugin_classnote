@@ -54,6 +54,13 @@ SETTING_DEFAULTS = {
 class Dashboard:
     def __init__(self, plugin):
         self.plugin = plugin
+        self._handlers = []
+
+    def close(self):
+        routes = getattr(self.plugin.context, "registered_web_apis", None)
+        if isinstance(routes, list):
+            routes[:] = [route for route in routes if route[1] not in self._handlers]
+        self._handlers.clear()
 
     def register(self):
         for route, method, handler in (
@@ -83,6 +90,7 @@ class Dashboard:
                         "操作未完成，请检查插件日志后重试。", status_code=500
                     )
 
+            self._handlers.append(endpoint)
             self.plugin.context.register_web_api(
                 f"/{PLUGIN}/{route}", endpoint, [method], f"ClassNote {route}"
             )
@@ -198,7 +206,7 @@ class Dashboard:
             )
         return json_response(
             {
-                "version": "0.3.0",
+                "version": "0.3.1",
                 "now": now.isoformat(),
                 "bindings": summary,
                 "selected": detail,
@@ -377,10 +385,6 @@ class Dashboard:
             elif key == "scheduler_mode":
                 if value not in ("future_tasks", "polling"):
                     raise TimetableError("请选择未来任务或插件轮询。")
-                if value == "future_tasks" and not self.plugin.future_tasks.available:
-                    raise TimetableError(
-                        "当前 AstrBot 不支持未来任务接口，请升级后再试。"
-                    )
             elif key == "fallback_opener":
                 if not isinstance(value, str) or not clean(value, 100):
                     raise TimetableError("请填写模型不可用时的备用提醒开头。")

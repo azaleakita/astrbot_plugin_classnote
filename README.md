@@ -1,8 +1,8 @@
 <p align="center"><img src="docs/assets/hero.svg" alt="课笺 ClassNote · 让每一次上课，都有一句温柔的提醒" width="100%" /></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.0-a58bc7?style=flat-square" alt="version 0.3.0" />
-  <img src="https://img.shields.io/badge/AstrBot-%E2%89%A54.29.3-75629a?style=flat-square" alt="AstrBot >=4.29.3" />
+  <img src="https://img.shields.io/badge/version-0.3.1-a58bc7?style=flat-square" alt="version 0.3.1" />
+  <img src="https://img.shields.io/badge/AstrBot-%E2%89%A54.20-75629a?style=flat-square" alt="AstrBot >=4.20" />
   <img src="https://img.shields.io/badge/Python-3.11%2B-5a718b?style=flat-square" alt="Python 3.11+" />
   <img src="https://img.shields.io/badge/iCalendar-ICS-b38d9f?style=flat-square" alt="iCalendar ICS" />
   <img src="https://img.shields.io/badge/license-MIT-8b8198?style=flat-square" alt="MIT license" />
@@ -33,7 +33,9 @@
 
 ## 快速开始
 
-**环境：AstrBot >=4.29.3、<5；Python >=3.11；已接入能够主动发送消息的 QQ 适配器。**
+**环境：AstrBot >=4.20、<5；Python >=3.11，并满足所用 AstrBot 自身的 Python 要求；已接入能够主动发送消息的 QQ 适配器。**
+
+0.3.1 修复 0.3.0 过高的版本限制和页面接口导致的加载失败。管理页需要新版插件视图与 Web API（已验证 4.28.2、4.29.3）；4.20.0 可使用 QQ 指令和原生未来任务，缺少新版页面接口时会跳过管理页。
 
 1. 在 AstrBot 插件管理中从 `https://github.com/azaleakita/astrbot_plugin_classnote` 安装，或将仓库文件放进 `data/plugins/astrbot_plugin_classnote/`。
 2. 重载插件，确认自己的 QQ 账号已加入 AstrBot 管理员。默认只开放管理员私聊使用。
@@ -50,7 +52,7 @@
 
 ## 可视化课表管理
 
-`v0.3.0` 随插件提供官方 `views/classnote/` 视图，无需额外启动网页服务或构建前端。重载插件后，在插件详情中打开“课表管理”；支持侧边栏视图入口、桌面与窄屏布局，以及跟随 AstrBot 的浅色 / 深色主题。
+自 `v0.3.0` 起随插件提供官方 `views/classnote/` 视图，无需额外启动网页服务或构建前端。重载插件后，在插件详情中打开“课表管理”；支持侧边栏视图入口、桌面与窄屏布局，以及跟随 AstrBot 的浅色 / 深色主题。
 
 | 页面 | 可以做什么 |
 | --- | --- |
@@ -72,6 +74,7 @@
 - 可在课笺“提醒计划”或 AstrBot 原生“未来任务”中暂停单项任务；手动删除的任务不会被自动建回来，需要时点击“恢复已删除的任务”。
 - 原生任务的时间请勿单独编辑，改课请使用课笺设置，避免和课程事实不一致。
 - 插件重载时只清理并重新绑定自己管理的任务，保留单项暂停状态；不修改其他插件或手动创建的任务。
+- 未来任务接口缺失时自动使用轮询；接口恢复后自动接入原生任务，页面显示实际使用的模式。
 - 可切换 `scheduler_mode=polling` 使用原有每 10 秒轮询；两种模式共享 SQLite 投递记录，切换不会重发已成功的提醒。
 - 未来任务回调最多并行 4 条；每张课表预排最多 200 项，全部课表合计最多 1000 项。触及上限时页面提示，剩余任务随时间推进续排。
 
@@ -159,7 +162,7 @@ WakeUp Android/鸿蒙版导出日历默认带提前 20 分钟提醒。新订阅�
 
 文件上限 2 MiB，原始事件最多 2000 条，展开最多 10000 课次，整体跨度最多 550 天。只接收带精确起止时间的有限课程；全天事件、无限重复、小时/分钟级重复、无效时间和未知时区会明确拒绝。主要面向 `Asia/Shanghai`，夏令时切换未专项验证。
 
-当前 **76 项 Python 离线测试与 14 项页面交互测试通过**，覆盖日历解析、原有调度与人格、原生任务续排 / 去重 / 重启 / 重试，以及管理页导入、设置、任务开关和错误状态。另用 AstrBot 4.29.3 当前官方 `CronJobManager` 与 Web API helper 进行了本地契约检查；未在用户真实 QQ 实例和完整 AstrBot WebUI 中完成部署联调。页面交互测试使用 jsdom，不等同于真实浏览器视觉验证。
+当前 **79 项 Python 离线测试与 15 项页面交互测试通过**。新增真实 AstrBot **4.20.0、4.28.2、4.29.3** 集成测试：完整插件加载器、真实 SQLite、原生一次性任务创建、提醒回调去重与卸载清理均已通过；CI 持续执行同一矩阵。集成测试仅替换外部 QQ 发信，未在用户真实 QQ 实例和完整 AstrBot WebUI 中完成部署联调。页面交互测试使用 jsdom。
 
 ```bash
 # 在插件目录的父目录运行

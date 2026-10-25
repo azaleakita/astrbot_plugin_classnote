@@ -16,12 +16,25 @@ TOTAL_LIMIT = 1000
 class FutureTasks:
     def __init__(self, plugin):
         self.plugin = plugin
-        self.manager = getattr(plugin.context, "cron_manager", None)
+        self._bound_manager = None
         self.lock = asyncio.Lock()
         self.jobs = []
         self.last_sync = None
         self.error = ""
         self.truncated = False
+
+    @property
+    def manager(self):
+        return getattr(self.plugin.context, "cron_manager", None)
+
+    @property
+    def effective_mode(self):
+        requested = self.plugin.config.get("scheduler_mode", "future_tasks")
+        return (
+            "future_tasks"
+            if requested == "future_tasks" and self.available
+            else "polling"
+        )
 
     @property
     def available(self):
@@ -37,7 +50,7 @@ class FutureTasks:
 
     async def callback(self, binding_id, key, epoch, revision, **_):
         """Revalidate the live course at execution time, then use the shared outbox."""
-        if self.plugin.config.get("scheduler_mode", "future_tasks") != "future_tasks":
+        if self.effective_mode != "future_tasks":
             return
         binding = self.plugin.store.get(binding_id)
         if (
@@ -72,16 +85,16 @@ class FutureTasks:
         async with self.lock:
             if not self.available:
                 self.error = (
-                    "当前 AstrBot 未提供未来任务调度接口，请升级或改用插件轮询。"
+                    "当前 AstrBot 未提供未来任务调度接口，已自动使用插件轮询提醒。"
                 )
-                if (
-                    self.plugin.config.get("scheduler_mode", "future_tasks")
-                    == "future_tasks"
-                ):
-                    raise RuntimeError(self.error)
+                self.jobs = []
                 return
             try:
-                await self._sync(rebind=rebind, reset_deleted=reset_deleted)
+                await self._sync(
+                    rebind=rebind or self._bound_manager is not self.manager,
+                    reset_deleted=reset_deleted,
+                )
+                self._bound_manager = self.manager
                 self.last_sync = datetime.now(timezone.utc).isoformat()
                 self.error = ""
             except Exception as exc:
@@ -261,11 +274,13 @@ class FutureTasks:
                     self.plugin.store.save_task(key, body)
                     await self.manager.delete_job(job.job_id)
             self.jobs = []
+            self._bound_manager = None
 
     def status(self):
         return {
             "available": self.available,
-            "mode": self.plugin.config.get("scheduler_mode", "future_tasks"),
+            "mode": self.effective_mode,
+            "requested_mode": self.plugin.config.get("scheduler_mode", "future_tasks"),
             "last_sync": self.last_sync,
             "error": self.error,
             "horizon_days": HORIZON_DAYS,
