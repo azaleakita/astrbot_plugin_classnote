@@ -2,7 +2,7 @@
 
 ## 打开页面
 
-升级至 AstrBot 4.29.3 或更新版本，更新课笺并重载。在 WebUI 的“插件”中打开课笺详情，选择“课表管理”。AstrBot 扫描 `views/classnote/index.html`，并读取 `.astrbot-plugin/i18n/` 中的视图名称；侧边栏视图分组与置顶方式由 AstrBot 控制。
+使用支持新版插件页面接口的 AstrBot（已验证 4.28.2、4.29.3），更新课笺并重载。在 WebUI 的“插件”中打开课笺详情，选择“课表管理”。AstrBot 扫描 `views/classnote/index.html`，并读取 `.astrbot-plugin/i18n/` 中的视图名称；侧边栏视图分组与置顶方式由 AstrBot 控制。
 
 页面没有独立登录、端口和前端构建步骤。通过 AstrBot 注入的 `AstrBotPluginView` / `AstrBotPluginPage` bridge 调用课笺 API，不能将 HTML 单独打开当成完整服务。
 
@@ -61,3 +61,7 @@
 管理页拥有 Dashboard 管理员的管理范围，不用于向普通 QQ 用户暴露其他人的课表。课笺不会清理、修改或运行没有课笺所有者标记的原生任务。
 
 实现依据：[官方插件视图文档](https://docs.astrbot.app/dev/star/guides/plugin-pages.html)、[官方调度器源码](https://github.com/AstrBotDevs/AstrBot/blob/master/astrbot/core/cron/manager.py)。
+
+### 0.3.1 兼容行为
+
+最低支持 AstrBot 4.20。旧版缺少 `astrbot.api.web` 时只跳过管理页，不影响 QQ 课表指令和课程提醒；可通过 `/课表 状态` 查看页面诊断。未来任务接口缺失时自动使用轮询，接口就绪后自动续排，管理页显示实际调度模式。重载会清理本插件注册的页面接口。
