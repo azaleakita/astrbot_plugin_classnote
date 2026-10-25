@@ -74,7 +74,7 @@ function table(headers, rows, empty) {
 function render() {
   const selected = state.selected;
   const scheduler = state.scheduler;
-  const future = state.settings.scheduler_mode === "future_tasks";
+  const future = (state.scheduler.mode || state.settings.scheduler_mode) === "future_tasks";
   $("connection").textContent = scheduler.error ? "需要处理" : "已连接 AstrBot";
   $("connection").className = `chip${scheduler.error ? " warn" : ""}`;
   $("engine-label").textContent = future ? "AstrBot 未来任务" : "插件轮询";
@@ -166,7 +166,7 @@ function renderOverview(b) {
 }
 function renderPlans(b) {
   const scheduler = state.scheduler;
-  const future = state.settings.scheduler_mode === "future_tasks";
+  const future = (state.scheduler.mode || state.settings.scheduler_mode) === "future_tasks";
   $("resync").disabled = !scheduler.available || writing;
   $("regenerate").hidden = !future;
   $("plans-subtitle").textContent = future
