@@ -6,6 +6,19 @@ on:
 permissions:
   contents: read
 jobs:
+  astrbot-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        astrbot: ['4.20.0', '4.28.2', '4.29.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install "astrbot==${{ matrix.astrbot }}" "mcp<2" -r requirements.txt
+      - run: python tests/runtime_integration.py
   ui-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 5
