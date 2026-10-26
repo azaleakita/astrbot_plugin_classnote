@@ -2,3 +2,4 @@ aiohttp>=3.9,<4
 tzdata>=2024.1
 icalendar>=6.3,<8
 recurring-ical-events>=3.3,<4
+Pillow>=10.4,<13

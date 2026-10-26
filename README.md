@@ -1,14 +1,14 @@
 <p align="center"><img src="docs/assets/hero.svg" alt="课笺 ClassNote · 让每一次上课，都有一句温柔的提醒" width="100%" /></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.4.0-a58bc7?style=flat-square" alt="version 0.4.0" />
+  <img src="https://img.shields.io/badge/version-0.5.1-a58bc7?style=flat-square" alt="version 0.5.1" />
   <img src="https://img.shields.io/badge/AstrBot-%E2%89%A54.20-75629a?style=flat-square" alt="AstrBot >=4.20" />
   <img src="https://img.shields.io/badge/Python-3.11%2B-5a718b?style=flat-square" alt="Python 3.11+" />
   <img src="https://img.shields.io/badge/iCalendar-ICS-b38d9f?style=flat-square" alt="iCalendar ICS" />
   <img src="https://img.shields.io/badge/license-MIT-8b8198?style=flat-square" alt="MIT license" />
 </p>
 
-<p align="center"><b>把课程记在笺上，把提醒留给熟悉的声音。</b><br />可视化课表 · AstrBot 未来任务 · WakeUp 导入 · 当前会话人格</p>
+<p align="center"><b>把课程记在笺上，把提醒留给熟悉的声音。</b><br />可视化课表 · AstrBot 未来任务 · WakeUp 导入 · 当前会话人格 · 单课图片</p>
 
 <p align="center"><a href="#快速开始">快速开始</a> · <a href="#导入你的课表">导入课表</a> · <a href="#常用指令">指令一览</a> · <a href="docs/INSTALL.md">安装与升级</a> · <a href="DESIGN.md">开发设计</a></p>
 
@@ -24,6 +24,7 @@
 | --- | --- |
 | 可视化管理 | 在 AstrBot 插件视图中查看一周课表，预览导入、停调课、修改提醒和查看投递记录 |
 | AstrBot 未来任务 | 为未来 7 天每次提醒建立一次性任务，自动续排，可在原生任务页中查看与暂停 |
+| 单节课程图片 | 深色圆角课程卡片，支持学校抬头、日期、时间与地点，人格开头仍保留 |
 | WakeUp 日历文件 | 直接发送 `.ics` 或 `.ical` 文件即可导入，不依赖分享口令继续有效 |
 | 每周不同的课程 | 支持重复规则、单双周、非连续日期和例外日期，按实际课次提醒 |
 | 日历中的调课 | 识别 `EXDATE`、`RDATE`、`RECURRENCE-ID` 与取消状态 |
@@ -64,6 +65,17 @@
 导入支持日历文件、分享文本和 WakeUp 备份；确认前会显示课次、范围、投递地与解析提示。页面通过 AstrBot 的 bridge 和认证接口通信，不存储 Dashboard 密码或令牌。管理员在页面中可以管理全部课表；QQ 指令仍按会话、发送者和插件权限隔离。
 
 详细操作与排查见 [可视化管理与未来任务](docs/WEBUI.md)。
+
+## 单节课程图片 · v0.5.1
+
+<p align="center"><img src="docs/assets/course-card.png" alt="吉林大学单课卡片效果示例，示例课程信息不代表实际课表" width="720" /></p>
+
+以深色渐变、圆角细边框、白色粗体字和红色竖条呈现一节课，去掉截图背景与另一节课程。卡片显示自定义抬头、上课日期、星期、课程名称、地点和起止时间。WakeUp 分享课表显示真实教学周；ICS 没有可靠教学周起点，显示“日历课程”，不猜测周数。跨午夜课程会注明两天的日期；长课程名可用两行，仍超长则省略，完整文字模式可查看全部信息。
+
+- **QQ 查询**：`/课表 图片`（或 `/课表 卡片`）显示正在进行的课程，否则显示下一节；提前提醒时间已过仍能查询，不消耗正式提醒。
+- **自动提醒**：默认发送人格开头＋课程图片，原生未来任务与轮询使用同一投递流程；`/课表 测试` 可预览。
+- **管理页 → 插件设置 → 课程图片**：选择“人格开头＋图片”“完整文字＋图片”或“仅文字”；卡片抬头可填写学校名称，最多 20 字。全局配置对应 `reminder_format=image/both/text` 与 `card_title`，保存后应用于已有排期，无需重新导入。
+- **本地绘制**：内置开源 Noto Sans SC 中文字体，不需安装浏览器、系统中文字体或访问图片服务；生成失败自动回退为完整文字。依赖增加 Pillow，更新时请允许 AstrBot 安装新依赖。
 
 ## 设置与任务需求实时同步 · v0.4.0
 
@@ -135,6 +147,7 @@ WakeUp Android/鸿蒙版导出日历默认带提前 20 分钟提醒。新订阅�
 | --- | --- |
 | `/课表 导入日历` | 等待或读取 WakeUp `.ics` 附件 |
 | `/课表 今日`、`/课表 明日`、`/课表 本周` | 查询实际课程 |
+| `/课表 图片`、`/课表 卡片` | 查看当前或下一节课的图片 |
 | `/课表 下次` | 查看接下来的 5 次计划提醒 |
 | `/课表 状态` | 查看日期范围、提醒设置及投递状态 |
 | `/课表 提前 20` | 使用自己的提前时间，单位为分钟 |
@@ -179,7 +192,7 @@ WakeUp Android/鸿蒙版导出日历默认带提前 20 分钟提醒。新订阅�
 
 文件上限 2 MiB，原始事件最多 2000 条，展开最多 10000 课次，整体跨度最多 550 天。只接收带精确起止时间的有限课程；全天事件、无限重复、小时/分钟级重复、无效时间和未知时区会明确拒绝。主要面向 `Asia/Shanghai`，夏令时切换未专项验证。
 
-当前 **88 项 Python 离线测试与 18 项页面交互测试通过**。新增真实 AstrBot **4.20.0、4.28.2、4.29.3** 集成测试：完整插件加载器、真实 SQLite、原生一次性任务创建、提醒回调去重与卸载清理均已通过；CI 持续执行同一矩阵。集成测试仅替换外部 QQ 发信，未在用户真实 QQ 实例和完整 AstrBot WebUI 中完成部署联调。页面交互测试使用 jsdom。
+当前 **103 项 Python 离线测试与 19 项页面交互测试通过**。新增真实 AstrBot **4.20.0、4.28.2、4.29.3** 集成测试：完整插件加载器、真实 SQLite、原生一次性任务创建、提醒回调去重与卸载清理均已通过；CI 持续执行同一矩阵。集成测试仅替换外部 QQ 发信，未在用户真实 QQ 实例和完整 AstrBot WebUI 中完成部署联调。页面交互测试使用 jsdom。
 
 ```bash
 # 在插件目录的父目录运行
@@ -196,7 +209,7 @@ npm run test:ui
 
 ## 致谢与许可
 
-基于 [AstrBot 官方插件文档](https://docs.astrbot.app/dev/star/plugin-new.html)；日历能力使用 [icalendar](https://icalendar.readthedocs.io/) 和 [recurring-ical-events](https://recurring-ical-events.readthedocs.io/)。WakeUp 导出方式参见 [官方使用文档](https://www.wakeup.fun/doc/export_schedule.html)。
+基于 [AstrBot 官方插件文档](https://docs.astrbot.app/dev/star/plugin-new.html)；日历能力使用 [icalendar](https://icalendar.readthedocs.io/) 和 [recurring-ical-events](https://recurring-ical-events.readthedocs.io/)。图片由 Pillow 本地绘制，内置字体采用 [SIL OFL 1.1](assets/fonts/OFL.txt)，来源与说明见 [字体许可](assets/fonts/README.md)。WakeUp 导出方式参见 [官方使用文档](https://www.wakeup.fun/doc/export_schedule.html)。
 
 经典分享字段与五段备份协议参考 [koishi-plugin-course-schedule](https://github.com/VincentZyuApps/koishi-plugin-course-schedule) 作者公开维护的实现说明。本插件独立编写，未复制其源代码。
 

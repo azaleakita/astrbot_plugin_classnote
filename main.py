@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import aiohttp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
-from astrbot.api.message_components import At, File, Plain, Reply
+from astrbot.api.message_components import At, File, Image, Plain, Reply
 from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
@@ -21,6 +21,7 @@ from .core import (
     TimetableError,
     bounded_int,
     clean,
+    current_or_next_course,
     digest,
     due_reminders,
     iso_date,
@@ -29,6 +30,7 @@ from .core import (
     parse_timetable,
     teaching_week,
 )
+from .course_card import card_settings, course_label, render_course_card
 from .future_tasks import FutureTasks
 from .ics import parse_calendar
 from .persona import generate_opener
@@ -41,6 +43,7 @@ HELP = """课笺 · ClassNote
 /课表 导入 <WakeUp分享文本、口令或含key的链接>
 /课表 导入文本 <WakeUp备份原始文本或JSON>
 /课表 状态 / 今日 / 明日 / 本周 / 下次
+/课表 图片（当前或下一节课的单课卡片）
 /课表 提前 20 或 /课表 提前 30,10
 /课表 提前 日历（恢复使用ICS自带的提前提醒）
 /课表 提前 默认（跟随插件设置）
@@ -58,7 +61,7 @@ WakeUp导入是课表快照，App后续修改需重新分享导入。"""
     "astrbot_plugin_classnote",
     "CREAM",
     "课笺：WakeUp日历与分享课表提醒，沿用当前会话人格",
-    "0.4.0",
+    "0.5.1",
 )
 class ClassNote(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -98,6 +101,7 @@ class ClassNote(Star):
         zone = str(self.config.get("timezone", "Asia/Shanghai"))
         ZoneInfo(zone)  # Invalid configuration must fail visibly at load time.
         self._lead(self.config.get("default_lead_minutes", [20]))
+        card_settings(self.config)
         validate_requirement(
             self.config.get("task_requirement_template", DEFAULT_REQUIREMENT),
             template=True,
@@ -271,7 +275,10 @@ class ClassNote(Star):
         except Exception as exc:
             logger.error(f"[classnote] command failed: {type(exc).__name__}")
             response = "操作未完成，已有课表仍保留。请检查插件日志中的错误类型。"
-        yield event.plain_result(response)
+        if isinstance(response, list):
+            yield event.chain_result(response)
+        else:
+            yield event.plain_result(response)
 
     async def _dispatch(self, event, action, argument):
         if action in ("帮助", "help", ""):
@@ -317,6 +324,20 @@ class ClassNote(Star):
             return "已删除你在当前会话的课表及提醒记录。"
         binding = self._get_binding(event)
         now = datetime.now(ZoneInfo(binding["timezone"]))
+        if action in ("图片", "卡片"):
+            item = await asyncio.to_thread(current_or_next_course, binding, now)
+            if not item:
+                return "当前课表没有正在进行或尚未开始的课程。"
+            try:
+                data = await asyncio.to_thread(
+                    render_course_card, dict(self.config), item, course_label(item, now)
+                )
+                return [Image.fromBytes(data)]
+            except Exception as exc:
+                logger.warning(
+                    f"[classnote] card fallback: {type(exc).__name__}: {exc}"
+                )
+                return "课程图片暂时不可用，已改为文字：\n" + self._course_text(item)
         if action == "状态":
             state = self.store.latest(binding["id"])
             latest = (
@@ -480,11 +501,26 @@ class ClassNote(Star):
             "发送 /课表 下次 核对，或 /课表 测试 检查主动投递与人格。" + notice
         )
 
+    @staticmethod
+    def _course_text(item):
+        return (
+            f"{item['name']}\n"
+            f"{item['begin']:%m月%d日 %H:%M}–"
+            + item["finish"].strftime(
+                "%m月%d日 %H:%M"
+                if item["finish"].date() != item["begin"].date()
+                else "%H:%M"
+            )
+            + f" · {item['room'] or '地点未填写'}"
+        )
+
     async def _send(self, binding, item, preview=False):
         settings = (
             self.config.get("use_llm_persona", True),
             self.config.get("fallback_opener"),
             self.config.get("task_requirement_template"),
+            self.config.get("reminder_format", "image"),
+            self.config.get("card_title", "课笺"),
         )
         fallback = clean(
             self.config.get("fallback_opener", "该准备去上课了，记得带齐需要的东西。"),
@@ -503,12 +539,29 @@ class ClassNote(Star):
         except Exception as exc:
             logger.warning(f"[classnote] persona fallback: {type(exc).__name__}")
             opener = fallback
+        mode, _ = card_settings(self.config)
+        card = None
+        if mode != "text":
+            try:
+                data = await asyncio.to_thread(
+                    render_course_card,
+                    dict(self.config),
+                    item,
+                    "测试提醒" if preview else "课程提醒",
+                )
+                card = Image.fromBytes(data)
+            except Exception as exc:
+                logger.warning(
+                    f"[classnote] card fallback: {type(exc).__name__}: {exc}"
+                )
         # Re-check after the await: pause/import/delete/override may have happened meanwhile.
         async with self.send_lock:
             if settings != (
                 self.config.get("use_llm_persona", True),
                 self.config.get("fallback_opener"),
                 self.config.get("task_requirement_template"),
+                self.config.get("reminder_format", "image"),
+                self.config.get("card_title", "课笺"),
             ):
                 return False
             live = self.store.get(binding["id"])
@@ -527,21 +580,15 @@ class ClassNote(Star):
                 )
                 if (now - item["fire"]).total_seconds() > grace:
                     return False
-            content = (
-                ("【测试提醒】\n" if preview else "") + opener + "\n"
-                f"{item['name']}\n"
-                f"{item['begin']:%m月%d日 %H:%M}–"
-                + item["finish"].strftime(
-                    "%m月%d日 %H:%M"
-                    if item["finish"].date() != item["begin"].date()
-                    else "%H:%M"
-                )
-                + f" · {item['room'] or '地点未填写'}"
-            )
+            content = ("【测试提醒】\n" if preview else "") + opener
+            if mode in ("text", "both") or card is None:
+                content += "\n" + self._course_text(item)
             chain = MessageChain()
             if binding["group"]:
                 chain.chain.append(At(qq=binding["sender"]))
             chain.chain.append(Plain(content))
+            if card is not None:
+                chain.chain.append(card)
             # send_message returns False if it cannot find the destination platform.
             async with asyncio.timeout(20):
                 delivered = await self.context.send_message(binding["umo"], chain)
