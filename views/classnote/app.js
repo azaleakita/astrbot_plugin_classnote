@@ -181,7 +181,7 @@ function renderPlans(b) {
   const rows = future
     ? jobs.map(
         (j) =>
-          `<tr><td><strong>${escape(j.course)}</strong><small>${dateTime(j.begin)} 上课</small></td><td><time>${dateTime(j.fire)}</time></td><td><span class="chip${j.enabled ? "" : " muted"}">${j.enabled ? "已排入" : "已暂停"}</span></td><td><button class="quiet" data-task-id="${escape(j.id)}" data-enable="${!j.enabled}">${j.enabled ? "暂停此次" : "恢复此次"}</button></td></tr>`,
+          `<tr><td><strong>${escape(j.course)}</strong><small>${dateTime(j.begin)} 上课</small><details><summary>任务需求 · ${j.custom_requirement ? "单条自定义" : "跟随全局"}</summary><p style="white-space:pre-wrap">${escape(j.requirement || "等待同步需求")}</p></details></td><td><time>${dateTime(j.fire)}</time></td><td><span class="chip${j.enabled ? "" : " muted"}">${j.enabled ? "已排入" : "已暂停"}</span></td><td><button class="quiet" data-task-id="${escape(j.id)}" data-enable="${!j.enabled}">${j.enabled ? "暂停此次" : "恢复此次"}</button><button class="quiet" data-requirement-id="${escape(j.id)}">编辑需求</button></td></tr>`,
       )
     : (b?.upcoming || []).map(
         (j) =>
@@ -415,7 +415,7 @@ function configureBinding() {
   const b = state.selected;
   openModal(
     "课表提醒设置",
-    `<form id="binding-form" class="dialog-form"><p class="dialog-note">${escape(b.name)} · ${escape(b.nickname || b.sender)}<br/>时区：${escape(b.timezone)}</p><label>提前提醒来源<select id="lead-source"><option value="custom"${b.custom_lead || b.kind !== "calendar" ? " selected" : ""}>自定义提前量</option>${b.kind === "calendar" ? `<option value="calendar"${!b.custom_lead ? " selected" : ""}>沿用日历闹钟</option>` : ""}</select></label><label id="lead-value-label">提前分钟数<input id="lead-value" value="${escape(b.lead_minutes.join(","))}" placeholder="20 或 30,10"/><small>1–1440 分钟，最多 3 次。日历模式下无闹钟的课程使用这些默认值。</small></label>${b.kind !== "calendar" ? `<label>第一教学周周一<input id="semester-monday" type="date" value="${escape(b.monday)}" required/></label>` : ""}<label class="switch-row"><span><strong>开启此课表提醒</strong></span><input id="binding-enabled" type="checkbox" class="switch"${b.enabled ? " checked" : ""}/></label>${modalError()}<div class="dialog-actions"><button type="button" class="secondary" data-close>取消</button><button type="submit" class="primary">保存提醒设置</button></div></form>`,
+    `<form id="binding-form" class="dialog-form"><p class="dialog-note">${escape(b.name)} · ${escape(b.nickname || b.sender)}<br/>时区：${escape(b.timezone)}</p><label>提前提醒来源<select id="lead-source"><option value="default"${!b.custom_lead && (b.kind !== "calendar" || b.respect_ics_alarms === false) ? " selected" : ""}>跟随插件默认设置</option><option value="custom"${b.custom_lead ? " selected" : ""}>自定义提前量</option>${b.kind === "calendar" ? `<option value="calendar"${!b.custom_lead && b.respect_ics_alarms !== false ? " selected" : ""}>沿用日历闹钟</option>` : ""}</select></label><label id="lead-value-label">提前分钟数<input id="lead-value" value="${escape(b.lead_minutes.join(","))}" placeholder="20 或 30,10"/><small>1–1440 分钟，最多 3 次。日历模式下无闹钟的课程使用这些默认值。</small></label>${b.kind !== "calendar" ? `<label>第一教学周周一<input id="semester-monday" type="date" value="${escape(b.monday)}" required/></label>` : ""}<label class="switch-row"><span><strong>开启此课表提醒</strong></span><input id="binding-enabled" type="checkbox" class="switch"${b.enabled ? " checked" : ""}/></label>${modalError()}<div class="dialog-actions"><button type="button" class="secondary" data-close>取消</button><button type="submit" class="primary">保存提醒设置</button></div></form>`,
   );
   $("binding-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -438,6 +438,21 @@ function configureBinding() {
     }
   });
 }
+function openRequirement(id) {
+  const job = state.scheduler.jobs.find((j) => j.id === id);
+  if (!job) return;
+  openModal("编辑此次提醒的任务需求", `<form id="requirement-form" class="dialog-form"><p class="dialog-note">${escape(job.course)} · ${dateTime(job.begin)}。内容同步到 AstrBot 未来任务，并用于本次人格生成；准确课程信息仍由程序追加。</p><label>任务需求<textarea id="requirement-text" rows="7" maxlength="4000" required>${escape(job.requirement || "")}</textarea></label><label><input id="requirement-reset" type="checkbox"/> 恢复跟随全局模板</label><p class="dialog-note">单条自定义需求在修改全局模板后仍保留。勾选恢复后，将使用最新全局模板。</p>${modalError()}<div class="dialog-actions"><button type="button" class="secondary" data-close>取消</button><button type="submit" class="primary">保存并同步</button></div></form>`);
+  $("requirement-reset").addEventListener("change", () => {
+    $("requirement-text").disabled = $("requirement-reset").checked;
+  });
+  $("requirement-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await write("tasks", { operation: "requirement", id, text: $("requirement-text").value, reset: $("requirement-reset").checked }, { close: true });
+    } catch { /* Keep the edited requirement visible. */ }
+  });
+}
+
 function openOverride() {
   const b = state.selected;
   const date = b.days.find((d) => d.today)?.date || b.start;
@@ -481,6 +496,7 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.tab) activate(button.dataset.tab);
   if (button.hasAttribute("data-open-import")) openImport();
   if (button.hasAttribute("data-close") && !writing) $("modal").close();
+  if (button.dataset.requirementId) openRequirement(button.dataset.requirementId);
   if (button.dataset.taskId) {
     try {
       await write("tasks", {
