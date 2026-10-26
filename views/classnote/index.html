@@ -200,6 +200,20 @@
             <section class="panel">
               <div class="section-heading">
                 <div>
+                  <h2>课程图片</h2>
+                  <p>深色圆角单课卡片，保留熟悉的人格开头。</p>
+                </div>
+              </div>
+              <label>提醒形式<select name="reminder_format">
+                <option value="image">人格开头 ＋ 课程图片</option>
+                <option value="both">完整文字 ＋ 课程图片</option>
+                <option value="text">仅文字</option>
+              </select><small>适用于未来任务、轮询和测试提醒。生成图片失败时自动发送完整文字。</small></label>
+              <label>卡片抬头<input name="card_title" maxlength="20" required placeholder="例如：吉林大学"/><small>可填写学校名称，最多 20 字。QQ 发送 /课表 图片 查看当前或下一节课。</small></label>
+            </section>
+            <section class="panel">
+              <div class="section-heading">
+                <div>
                   <h2>熟悉的语气</h2>
                   <p>读取目标会话当前生效的人格与模型。</p>
                 </div>
@@ -266,7 +280,7 @@
           </form>
         </section>
         <footer>
-          课笺 · ClassNote <span id="version">v0.4.0</span
+          课笺 · ClassNote <span id="version">v0.5.1</span
           ><span>准时提醒，也保留你的节奏。</span>
         </footer>
       </main>
