@@ -72,7 +72,9 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.plugin.store = Store(":memory:")
         self.b = self.plugin.store.save(binding())
         self.future = self.plugin.future_tasks
-        self.clock = patch("astrbot_plugin_classnote.future_tasks.datetime", Clock)
+        self.clock = patch.dict(
+            self.future.sync.__func__.__globals__, {"datetime": Clock}
+        )
         self.clock.start()
         self.main_clock = patch.object(self.main, "datetime", Clock)
         self.main_clock.start()
@@ -166,7 +168,9 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
     async def test_changed_lead_time_replaces_stale_jobs(self):
         await self.future.sync()
         old = (await self.manager.list_jobs())[0]
-        self.plugin.store.save({**self.b, "lead_minutes": [30, 10]})
+        self.plugin.store.save(
+            {**self.b, "lead_minutes": [30, 10], "custom_lead": True}
+        )
         await self.future.sync()
         jobs = await self.manager.list_jobs()
         self.assertEqual(len(jobs), 2)
@@ -233,6 +237,95 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await self.future.sync()
         self.assertEqual(await self.manager.list_jobs(), [])
+
+    async def test_global_requirement_updates_existing_paused_job_in_place(self):
+        await self.future.sync()
+        job = self.future.jobs[0]
+        await self.manager.update_job(job.job_id, enabled=False)
+        self.plugin.config["task_requirement_template"] = (
+            "温柔提醒 {nickname}：{course} 在 {start} 开始，地点 {room}。"
+        )
+        await self.future.sync()
+        fresh = self.future.jobs[0]
+        self.assertEqual(fresh.job_id, job.job_id)
+        self.assertFalse(fresh.enabled)
+        self.assertIn("温柔提醒 CREAM：大学化学 在 08:00", fresh.description)
+        self.assertEqual(self.manager.counter, 1)
+
+    async def test_default_lead_updates_inherited_binding_and_keeps_custom_binding(
+        self,
+    ):
+        self.plugin.store.save(
+            {**self.b, "id": "custom", "lead_minutes": [15], "custom_lead": True}
+        )
+        await self.future.sync()
+        self.plugin.config["default_lead_minutes"] = [30, 10]
+        await self.future.sync()
+        jobs = self.future.jobs
+        self.assertEqual(
+            sorted(
+                j.payload["lead"]
+                for j in jobs
+                if j.payload["binding_id"] == self.b["id"]
+            ),
+            [10, 30],
+        )
+        self.assertEqual(
+            [j.payload["lead"] for j in jobs if j.payload["binding_id"] == "custom"],
+            [15],
+        )
+
+    async def test_native_requirement_edit_survives_template_change_and_reload(self):
+        await self.future.sync()
+        job = self.future.jobs[0]
+        await self.manager.update_job(
+            job.job_id, description="请俏皮一点，提醒带上水杯。"
+        )
+        self.plugin.config["task_requirement_template"] = "全局新模板 {course}"
+        await self.future.close()
+        await self.future.sync(rebind=True)
+        self.assertEqual(self.future.jobs[0].description, "请俏皮一点，提醒带上水杯。")
+        self.assertTrue(self.future.status()["jobs"][0]["custom_requirement"])
+
+    async def test_callback_reads_new_template_without_prior_resync(self):
+        await self.future.sync()
+        job = self.future.jobs[0]
+        self.plugin.config["task_requirement_template"] = (
+            "请用活泼语气提醒 {nickname} 去上 {course}。"
+        )
+        Clock.instant = datetime.fromisoformat(job.payload["run_at"])
+        with patch.object(
+            self.main, "generate_opener", AsyncMock(return_value="准备出发吧。")
+        ) as generate:
+            await self.future.callback(**job.payload)
+        self.assertIn("活泼语气提醒 CREAM", generate.call_args.kwargs["requirement"])
+        self.plugin.context.send_message.assert_awaited_once()
+
+    async def test_timezone_change_keeps_calendar_delivery_identity(self):
+        schedule = parse_calendar(
+            "BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:zone\nDTSTART:20261026T000000Z\nDTEND:20261026T004500Z\nSUMMARY:大学化学\nEND:VEVENT\nEND:VCALENDAR"
+        )
+        self.plugin.store.save({**self.b, "schedule": schedule})
+        await self.future.sync()
+        job = self.future.jobs[0]
+        key = job.payload["key"]
+        self.plugin.config["timezone"] = "UTC"
+        await self.future.sync()
+        self.assertEqual(self.future.jobs[0].job_id, job.job_id)
+        self.assertEqual(self.future.jobs[0].payload["key"], key)
+        self.assertIn("00:00", self.future.jobs[0].description)
+        self.plugin.store.claim(key, self.b["id"], Clock.instant.timestamp())
+        self.plugin.store.finish(key, Clock.instant.timestamp())
+        self.plugin.config["timezone"] = "Asia/Tokyo"
+        await self.future.sync()
+        self.assertEqual(self.future.jobs, [])
+
+    async def test_deleted_job_is_not_recreated_when_template_changes(self):
+        await self.future.sync()
+        await self.manager.delete_job(self.future.jobs[0].job_id)
+        self.plugin.config["task_requirement_template"] = "新模板 {course}"
+        await self.future.sync()
+        self.assertFalse(self.future.jobs)
 
 
 def dashboard_module():
@@ -370,11 +463,69 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             {"catchup_seconds": 10},
             {"token": "secret"},
             {"scheduler_mode": "unknown"},
+            {"task_requirement_template": "{unknown}"},
+            {"task_requirement_template": "{course.__class__}"},
+            {"task_requirement_template": "{course:>9000000}"},
+            {"task_requirement_template": ""},
         ):
             self.payload(body)
             with self.subTest(body=body), self.assertRaises((ValueError, KeyError)):
                 await self.dashboard.settings()
         self.assertEqual(self.plugin.config["scheduler_mode"], "polling")
+
+    async def test_requirement_editor_and_reset_update_existing_native_job(self):
+        self.context.cron_manager = NativeManager()
+        self.plugin.config["scheduler_mode"] = "future_tasks"
+        with (
+            patch.dict(
+                self.plugin.future_tasks.sync.__func__.__globals__, {"datetime": Clock}
+            ),
+            patch.object(self.web, "datetime", Clock),
+        ):
+            Clock.instant = datetime(2026, 10, 25, tzinfo=timezone.utc)
+            await self.plugin._sync_future()
+            job = self.plugin.future_tasks.jobs[0]
+            self.payload(
+                {
+                    "operation": "requirement",
+                    "id": job.job_id,
+                    "text": "请轻声提醒，带上笔记本。",
+                }
+            )
+            await self.dashboard.tasks()
+            self.assertEqual(
+                self.plugin.future_tasks.jobs[0].description, "请轻声提醒，带上笔记本。"
+            )
+            self.payload({"task_requirement_template": "新的全局要求 {course}"})
+            await self.dashboard.settings()
+            self.assertEqual(
+                self.plugin.future_tasks.jobs[0].description, "请轻声提醒，带上笔记本。"
+            )
+            self.payload({"operation": "requirement", "id": job.job_id, "reset": True})
+            await self.dashboard.tasks()
+            self.assertEqual(
+                self.plugin.future_tasks.jobs[0].description, "新的全局要求 大学化学"
+            )
+            self.assertEqual(self.plugin.future_tasks.jobs[0].job_id, job.job_id)
+
+    async def test_follow_default_can_override_calendar_alarm_preference(self):
+        self.plugin.config["default_lead_minutes"] = [35]
+        self.plugin.store.save(
+            {**self.b, "schedule": parse_calendar(calendar(event(extra=ALARM)))}
+        )
+        self.payload(
+            {
+                "binding_id": self.b["id"],
+                "action": "configure",
+                "lead_source": "default",
+                "enabled": True,
+            }
+        )
+        await self.dashboard.action()
+        live = self.plugin.store.get(self.b["id"])
+        self.assertEqual(live["lead_minutes"], [35])
+        self.assertFalse(live["custom_lead"])
+        self.assertFalse(live["respect_ics_alarms"])
 
     async def test_export_can_be_reimported_with_real_overrides_and_alarms(self):
         self.plugin.store.save(

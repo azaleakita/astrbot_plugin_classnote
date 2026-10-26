@@ -58,7 +58,7 @@ function fixture() {
     ],
   };
   return {
-    version: "0.3.1",
+    version: "0.4.0",
     bindings: [b],
     selected: b,
     records: [],
@@ -73,6 +73,7 @@ function fixture() {
       fallback_opener: "准备去上课吧。",
       catchup_seconds: 300,
       scheduler_mode: "future_tasks",
+      task_requirement_template: "提醒 {nickname} 去上 {course}",
     },
     scheduler: {
       available: true,
@@ -87,6 +88,8 @@ function fixture() {
           key: "course-key",
           binding_id: "binding",
           enabled: true,
+          requirement: "提醒测试课表准备出发。",
+          custom_requirement: false,
           course: "大学化学",
           fire: "2026-10-26T07:40:00+08:00",
           begin: "2026-10-26T08:00:00+08:00",
@@ -297,4 +300,34 @@ test("week navigation sends an ISO date seven days earlier", async (t) => {
   const { click, calls } = await setup(t);
   await click("previous-week");
   assert.equal(calls.at(-1).params.start, "2026-10-19");
+});
+test("settings submit the editable global task requirement template", async (t) => {
+  const { w, calls, submit } = await setup(t);
+  const field = w.document.querySelector('[name="task_requirement_template"]');
+  assert.equal(field.value, "提醒 {nickname} 去上 {course}");
+  field.value = "温柔提醒 {nickname}，带上水杯。";
+  await submit("settings-form");
+  assert.equal(calls.find((c) => c.endpoint === "settings" && c.method === "POST").payload.task_requirement_template, "温柔提醒 {nickname}，带上水杯。");
+});
+test("individual task requirement can be edited without toggling its enabled state", async (t) => {
+  const { w, $, calls, submit } = await setup(t);
+  w.document.querySelector('[data-requirement-id="native-1"]').click();
+  assert.equal($("requirement-text").value, "提醒测试课表准备出发。");
+  $("requirement-text").value = "请温柔提醒我带上笔记。";
+  await submit("requirement-form");
+  const post = calls.find((c) => c.method === "POST");
+  assert.equal(post.payload.operation, "requirement");
+  assert.equal(post.payload.id, "native-1");
+  assert.equal(post.payload.text, "请温柔提醒我带上笔记。");
+  assert.equal(post.payload.reset, false);
+  assert.equal(post.payload.enabled, undefined);
+});
+test("individual task requirement can return to following the global template", async (t) => {
+  const { w, $, calls, submit } = await setup(t);
+  w.document.querySelector('[data-requirement-id="native-1"]').click();
+  $("requirement-reset").checked = true;
+  $("requirement-reset").dispatchEvent(new w.Event("change"));
+  assert.equal($("requirement-text").disabled, true);
+  await submit("requirement-form");
+  assert.equal(calls.find((c) => c.method === "POST").payload.reset, true);
 });

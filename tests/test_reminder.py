@@ -286,6 +286,16 @@ class PersonalityTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("contexts", kwargs)
         c.persona_manager.get_default_persona_v3.assert_not_awaited()
 
+    async def test_task_requirement_guides_generation_without_removing_persona(self):
+        c = self.make_context()
+        await generate_opener(
+            c, binding(), "fallback", requirement="请使用轻松俏皮的语气，提醒带上水杯。"
+        )
+        prompt = c.llm_generate.call_args.kwargs["system_prompt"]
+        self.assertIn("Monika", prompt)
+        self.assertIn("提醒带上水杯", prompt)
+        self.assertIn("不要写课程名", prompt)
+
     async def test_session_override_resolver_has_priority(self):
         c = self.make_context()
         c.persona_manager.resolve_selected_persona = AsyncMock(
