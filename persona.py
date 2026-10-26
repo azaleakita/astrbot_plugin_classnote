@@ -50,7 +50,9 @@ def safe_opener(text: str) -> str:
     return text
 
 
-async def generate_opener(context, binding, fallback, enabled=True, timeout=8):
+async def generate_opener(
+    context, binding, fallback, enabled=True, timeout=8, requirement=""
+):
     if not enabled:
         return fallback
     _, persona = await current_persona(context, binding)
@@ -58,6 +60,7 @@ async def generate_opener(context, binding, fallback, enabled=True, timeout=8):
     examples = persona.get("begin_dialogs") or []
     system = (
         prompt
+        + ("\n\n本次提醒的任务需求：\n" + requirement if requirement else "")
         + "\n\n你正在主动发送一条上课提醒。沿用上方人格的身份、语气、称呼习惯与标点风格。"
         "只写一句简短、自然的提醒开头，最多八十字。不要解释自己在扮演角色。"
         "课程详情会由程序附在后面；你不要写课程名、日期、时间、倒计时、教室、数字，"

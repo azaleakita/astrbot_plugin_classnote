@@ -15,13 +15,16 @@ from .core import (
     bounded_int,
     clean,
     delivery_key,
+    due_reminders,
     iso_date,
     next_reminders,
     occurrences,
     parse_timetable,
+    reminder_key,
     reminder_leads,
 )
 from .ics import MAX_BYTES, parse_calendar
+from .task_text import DEFAULT_REQUIREMENT, render_requirement, validate_requirement
 from .wakeup import import_share
 
 PLUGIN = "astrbot_plugin_classnote"
@@ -48,6 +51,7 @@ SETTING_DEFAULTS = {
     "fallback_opener": "该准备去上课了，记得带齐需要的东西。",
     "catchup_seconds": 300,
     "scheduler_mode": "future_tasks",
+    "task_requirement_template": DEFAULT_REQUIREMENT,
 }
 
 
@@ -180,7 +184,7 @@ class Dashboard:
                 )
             upcoming = []
             for c in next_reminders(selected, now, 30):
-                key = delivery_key(selected["id"], c, c["lead"])
+                key = reminder_key(selected, c, c["lead"])
                 upcoming.append(
                     {
                         "key": key,
@@ -206,7 +210,7 @@ class Dashboard:
             )
         return json_response(
             {
-                "version": "0.3.1",
+                "version": "0.4.0",
                 "now": now.isoformat(),
                 "bindings": summary,
                 "selected": detail,
@@ -330,9 +334,13 @@ class Dashboard:
         if not isinstance(body.get("argument", ""), str):
             raise TimetableError("操作参数必须是文本。")
         if action == "configure":
-            leads = self.plugin._lead(body.get("lead_minutes", []))
             source = body.get("lead_source")
-            if source not in ("calendar", "custom") or (
+            leads = self.plugin._lead(
+                self.plugin.config.get("default_lead_minutes", [20])
+                if source == "default"
+                else body.get("lead_minutes", [])
+            )
+            if source not in ("calendar", "custom", "default") or (
                 source == "calendar" and binding["schedule"].get("kind") != "calendar"
             ):
                 raise TimetableError("请选择有效的提前提醒来源。")
@@ -351,6 +359,7 @@ class Dashboard:
                 binding.update(
                     lead_minutes=leads,
                     custom_lead=source == "custom",
+                    respect_ics_alarms=source == "calendar",
                     enabled=body["enabled"],
                 )
                 if monday:
@@ -380,6 +389,8 @@ class Dashboard:
                 ZoneInfo(value)
             elif key == "default_lead_minutes":
                 value = self.plugin._lead(value)
+            elif key == "task_requirement_template":
+                value = validate_requirement(value, template=True)
             elif key == "catchup_seconds":
                 value = bounded_int(value, 30, 900, "补发窗口")
             elif key == "scheduler_mode":
@@ -403,12 +414,72 @@ class Dashboard:
                 raise
         await self.plugin._sync_future()
         return json_response(
-            {"message": "设置已保存。已有课表保留各自的时区和提前量。"}
+            {
+                "message": "设置已保存并同步已有任务；个人提前量和日历自带提醒优先。"
+                + (
+                    f" {self.plugin.future_tasks.error}"
+                    if self.plugin.future_tasks.error
+                    else ""
+                )
+            }
         )
 
     async def tasks(self):
         body = await self.payload()
         scheduler = self.plugin.future_tasks
+        if body.get("operation") == "requirement":
+            reset = body.get("reset") is True
+            text = "" if reset else validate_requirement(body.get("text"))
+            async with scheduler.lock:
+                jobs = (
+                    await scheduler.manager.list_jobs() if scheduler.available else []
+                )
+                job = next(
+                    (
+                        j
+                        for j in jobs
+                        if j.job_id == body.get("id") and scheduler.owned(j)
+                    ),
+                    None,
+                )
+                if job is None:
+                    raise TimetableError("课笺任务不存在，请刷新列表。")
+                key = job.payload["key"]
+                binding = self.binding(job.payload["binding_id"])
+                item = next(
+                    (
+                        c
+                        for c in (
+                            due_reminders(binding, datetime.now(timezone.utc))
+                            + next_reminders(binding, datetime.now(timezone.utc), 201)
+                        )
+                        if reminder_key(binding, c, c["lead"]) == key
+                    ),
+                    None,
+                )
+                if reset and item is None:
+                    raise TimetableError("任务即将执行或已过期，请同步后重试。")
+                record = self.plugin.store.tasks().get(key, {})
+                if reset:
+                    record.pop("requirement_override", None)
+                    text = render_requirement(self.plugin.config, binding, item)
+                else:
+                    record["requirement_override"] = text
+                updated = await scheduler.manager.update_job(
+                    job.job_id, description=text
+                )
+                if updated is None:
+                    raise TimetableError("任务已不存在，请刷新后重试。")
+                record.update(binding_id=binding["id"], rendered_requirement=text)
+                self.plugin.store.save_task(key, record)
+            await scheduler.sync()
+            return json_response(
+                {
+                    "message": "已恢复全局模板。"
+                    if reset
+                    else "此次提醒的任务需求已更新。"
+                }
+            )
         if body.get("operation") == "sync":
             await scheduler.sync(reset_deleted=body.get("reset_deleted") is True)
             return json_response({"message": "未来任务已同步。"})

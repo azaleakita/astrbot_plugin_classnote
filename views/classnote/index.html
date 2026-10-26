@@ -165,12 +165,12 @@
                     天。</small
                   ></label
                 ><label
-                  >新课表默认时区<input
+                  >课表时区<input
                     name="timezone"
                     placeholder="Asia/Shanghai"
                     required
                   /><small
-                    >已有课表保持原时区；页面中的时间均按课表时区显示。</small
+                    >保存后同步已有课表与任务；日历的绝对上课时刻保持不变。</small
                   ></label
                 ><label
                   >默认提前分钟数<input
@@ -178,7 +178,7 @@
                     placeholder="20 或 30,10"
                     required
                   /><small
-                    >1–1440 分钟，最多 3 个；日历自带提醒或个人设置优先。</small
+                    >1–1440 分钟，最多 3 个；同步未设置个人提前量的课表，日历提醒优先。</small
                   ></label
                 ><label
                   >迟发容忍秒数<input
@@ -215,6 +215,10 @@
                   name="use_llm_persona"
                   class="switch" /></label
               ><label
+                >未来任务需求模板<textarea name="task_requirement_template" rows="6" maxlength="2000" required></textarea>
+                <small>保存后更新已有任务，并用于人格生成。支持 {nickname}、{course}、{date}、{start}、{end}、{room}、{lead}、{timezone}；字面花括号用 {{ 和 }}。单条自定义需求优先。</small>
+                <small>在“提醒计划”可预览或编辑每条需求。关闭人格生成时仍使用备用开头。</small>
+              </label><label
                 >备用提醒开头<textarea
                   name="fallback_opener"
                   rows="3"
@@ -262,7 +266,7 @@
           </form>
         </section>
         <footer>
-          课笺 · ClassNote <span id="version">v0.3.1</span
+          课笺 · ClassNote <span id="version">v0.4.0</span
           ><span>准时提醒，也保留你的节奏。</span>
         </footer>
       </main>

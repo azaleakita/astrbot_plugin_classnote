@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from .core import bounded_int, delivery_key, due_reminders, next_reminders
+from .core import bounded_int, due_reminders, next_reminders, reminder_key
+from .task_text import render_requirement, validate_requirement
 
 OWNER = "astrbot_plugin_classnote"
 HORIZON_DAYS = 7
@@ -48,10 +49,32 @@ class FutureTasks:
         payload = getattr(job, "payload", None)
         return isinstance(payload, dict) and payload.get("classnote_owner") == OWNER
 
+    @staticmethod
+    def capture_requirement(job, record):
+        """Retain edits made in AstrBot's native task editor as per-task overrides."""
+        rendered = record.get("rendered_requirement")
+        if rendered is not None and job.description != rendered and job.description:
+            record["requirement_override"] = validate_requirement(job.description)
+
+    async def requirement(self, binding, item):
+        key = item.get("key") or reminder_key(
+            binding, item, item.get("lead", binding["lead_minutes"][0])
+        )
+        record = self.plugin.store.tasks().get(key, {})
+        if self.available and self.effective_mode == "future_tasks":
+            for job in await self.manager.list_jobs():
+                if self.owned(job) and job.payload.get("key") == key:
+                    self.capture_requirement(job, record)
+                    break
+        return record.get("requirement_override") or render_requirement(
+            self.plugin.config, binding, item
+        )
+
     async def callback(self, binding_id, key, epoch, revision, **_):
         """Revalidate the live course at execution time, then use the shared outbox."""
         if self.effective_mode != "future_tasks":
             return
+        await self.plugin._apply_binding_defaults()
         binding = self.plugin.store.get(binding_id)
         if (
             not binding
@@ -82,6 +105,7 @@ class FutureTasks:
         persisted jobs through public APIs, preserving each job's enabled state.
         No private scheduler/handler registry is accessed.
         """
+        await self.plugin._apply_binding_defaults()
         async with self.lock:
             if not self.available:
                 self.error = (
@@ -127,9 +151,7 @@ class FutureTasks:
                 if len(in_range) > PER_BINDING_LIMIT:
                     self.truncated = True
                 for item in in_range[:PER_BINDING_LIMIT]:
-                    key = item.get("key") or delivery_key(
-                        binding["id"], item, item["lead"]
-                    )
+                    key = item.get("key") or reminder_key(binding, item, item["lead"])
                     item["key"] = key
                     record = self.plugin.store.delivery(key)
                     if record and (
@@ -146,11 +168,7 @@ class FutureTasks:
         for job in jobs:
             key = job.payload.get("key")
             target = desired.get(key)
-            stale = (
-                not target
-                or job.payload.get("epoch") != target[0].get("epoch")
-                or job.payload.get("revision") != target[0]["revision"]
-            )
+            stale = not target or job.payload.get("epoch") != target[0].get("epoch")
             if stale or key in by_key:
                 await self.manager.delete_job(job.job_id)
                 # Keep explicit deletion tombstones, but not removed schedules.
@@ -163,8 +181,14 @@ class FutureTasks:
             old = known.get(key, {})
             job = by_key.get(key)
             signature = [binding.get("epoch"), binding["revision"]]
-            if old.get("signature") != signature:
+            if old.get("signature", [None])[0] != signature[0]:
                 old = {}
+            if job:
+                self.capture_requirement(job, old)
+            description = old.get("requirement_override") or render_requirement(
+                self.plugin.config, binding, item
+            )
+            old["rendered_requirement"] = description
             suppressed = old.get("suppressed", False) and not reset_deleted
             # A missing pending job was deleted in AstrBot's task page. Do not
             # silently recreate it. Failed/claimed jobs may need crash recovery.
@@ -182,10 +206,32 @@ class FutureTasks:
                 )
                 continue
             enabled = bool(job.enabled) if job else old.get("enabled", True)
+            name = f"课笺 · {item['name']} · {item['begin']:%m/%d %H:%M} · 提前{item['lead']}分钟"
             if job and not rebind:
+                payload = {
+                    **job.payload,
+                    "revision": binding["revision"],
+                    "begin": item["begin"].isoformat(),
+                }
+                if (
+                    job.description != description
+                    or job.payload != payload
+                    or job.timezone != binding["timezone"]
+                    or job.name != name
+                ):
+                    updated = await self.manager.update_job(
+                        job.job_id,
+                        description=description,
+                        payload=payload,
+                        timezone=binding["timezone"],
+                        name=name,
+                    )
+                    if updated is None:
+                        raise RuntimeError("Native task disappeared during update")
                 self.plugin.store.save_task(
                     key,
                     {
+                        **old,
                         "binding_id": binding["id"],
                         "job_id": job.job_id,
                         "signature": signature,
@@ -222,10 +268,10 @@ class FutureTasks:
                 "lead": item["lead"],
             }
             job = await self.manager.add_basic_job(
-                name=f"课笺 · {item['name']} · {item['begin']:%m/%d %H:%M} · 提前{item['lead']}分钟",
+                name=name,
                 cron_expression="* * * * *",
                 handler=self.callback,
-                description=f"课笺生成的课程提醒；投递给 {binding['nickname'] or binding['sender']}。请在课笺管理页调课或修改提前量。",
+                description=description,
                 timezone=binding["timezone"],
                 payload=payload,
                 enabled=False,
@@ -246,6 +292,7 @@ class FutureTasks:
             self.plugin.store.save_task(
                 key,
                 {
+                    **old,
                     "binding_id": binding["id"],
                     "job_id": job.job_id,
                     "signature": signature,
@@ -267,6 +314,7 @@ class FutureTasks:
                 if self.owned(job):
                     key = job.payload.get("key")
                     body = self.plugin.store.tasks().get(key, {})
+                    self.capture_requirement(job, body)
                     body.update(
                         binding_id=job.payload["binding_id"], enabled=job.enabled
                     )
@@ -277,6 +325,7 @@ class FutureTasks:
             self._bound_manager = None
 
     def status(self):
+        records = self.plugin.store.tasks() if self.plugin.store else {}
         return {
             "available": self.available,
             "mode": self.effective_mode,
@@ -296,6 +345,12 @@ class FutureTasks:
                     "fire": job.payload.get("run_at"),
                     "begin": job.payload.get("begin"),
                     "course": job.payload.get("course"),
+                    "requirement": job.description or "",
+                    "custom_requirement": bool(
+                        records.get(job.payload.get("key"), {}).get(
+                            "requirement_override"
+                        )
+                    ),
                     "last_error": getattr(job, "last_error", None),
                 }
                 for job in self.jobs
