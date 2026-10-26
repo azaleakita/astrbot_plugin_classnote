@@ -23,6 +23,7 @@ from .core import (
     reminder_key,
     reminder_leads,
 )
+from .course_card import card_settings
 from .ics import MAX_BYTES, parse_calendar
 from .task_text import DEFAULT_REQUIREMENT, render_requirement, validate_requirement
 from .wakeup import import_share
@@ -52,6 +53,8 @@ SETTING_DEFAULTS = {
     "catchup_seconds": 300,
     "scheduler_mode": "future_tasks",
     "task_requirement_template": DEFAULT_REQUIREMENT,
+    "reminder_format": "image",
+    "card_title": "课笺",
 }
 
 
@@ -210,7 +213,7 @@ class Dashboard:
             )
         return json_response(
             {
-                "version": "0.4.0",
+                "version": "0.5.1",
                 "now": now.isoformat(),
                 "bindings": summary,
                 "selected": detail,
@@ -401,6 +404,7 @@ class Dashboard:
                     raise TimetableError("请填写模型不可用时的备用提醒开头。")
                 value = clean(value, 100)
             values[key] = value
+        card_settings({**self.plugin.config, **values})
         async with self.plugin.send_lock:
             previous = dict(self.plugin.config)
             self.plugin.config.update(values)

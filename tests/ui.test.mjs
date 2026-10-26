@@ -58,7 +58,7 @@ function fixture() {
     ],
   };
   return {
-    version: "0.4.0",
+    version: "0.5.1",
     bindings: [b],
     selected: b,
     records: [],
@@ -74,6 +74,8 @@ function fixture() {
       catchup_seconds: 300,
       scheduler_mode: "future_tasks",
       task_requirement_template: "提醒 {nickname} 去上 {course}",
+      reminder_format: "image",
+      card_title: "课笺",
     },
     scheduler: {
       available: true,
@@ -203,6 +205,17 @@ test("settings serialize switches as booleans and catch-up as a number", async (
   assert.equal(payload.allow_group, true);
   assert.equal(payload.catchup_seconds, 180);
   assert.equal(payload.scheduler_mode, "future_tasks");
+});
+test("image reminder format and custom school title are saved", async (t) => {
+  const { w, $, submit, calls } = await setup(t);
+  const form = $("settings-form");
+  form.elements.reminder_format.value = "both";
+  form.elements.card_title.value = "吉林大学";
+  form.dispatchEvent(new w.Event("input", { bubbles: true }));
+  await submit("settings-form");
+  const payload = calls.find((c) => c.endpoint === "settings").payload;
+  assert.equal(payload.reminder_format, "both");
+  assert.equal(payload.card_title, "吉林大学");
 });
 test("import requires preview followed by explicit confirmation", async (t) => {
   const { click, input, submit, calls, $ } = await setup(t);

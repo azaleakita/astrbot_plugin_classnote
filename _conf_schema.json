@@ -67,5 +67,22 @@
     "type": "text",
     "default": "请沿用当前会话的 bot 人格，自然地提醒 {nickname} 准备上课。\n课程：{course}；日期：{date}；时间：{start}–{end}；地点：{room}；提前 {lead} 分钟；时区：{timezone}。",
     "hint": "保存后同步已有任务；支持 {nickname} {course} {date} {start} {end} {room} {lead} {timezone}。最多2000字。任务需求指导人格生成，准确课程信息由程序追加。单条自定义需求优先。"
+  },
+  "reminder_format": {
+    "description": "课程提醒形式",
+    "type": "string",
+    "default": "image",
+    "options": [
+      "image",
+      "both",
+      "text"
+    ],
+    "hint": "image：人格开头＋单课图片；both：完整文字＋图片；text：仅文字。设置会应用于已排入的提醒。图片生成失败时自动转为完整文字。"
+  },
+  "card_title": {
+    "description": "课程图片抬头",
+    "type": "string",
+    "default": "课笺",
+    "hint": "例如学校名称，1–20字。图片只展示一节课；教学周来自分享课表，ICS显示“日历课程”。"
   }
 }

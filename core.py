@@ -306,6 +306,22 @@ def due_reminders(binding: dict, now: datetime, grace_seconds=300) -> list[dict]
     return sorted(result, key=lambda x: (x["fire"], x["name"]))
 
 
+def current_or_next_course(binding: dict, now: datetime):
+    """Course lookup is independent of whether its advance reminders have passed."""
+    local = now.astimezone(ZoneInfo(binding["timezone"]))
+    # ICS courses can cross midnight, with duration bounded to 24 hours.
+    for delta in range(
+        -1, 552 if binding["schedule"].get("kind") == "calendar" else 422
+    ):
+        on = local.date() + timedelta(days=delta)
+        for item in occurrences(
+            binding["schedule"], on, binding["timezone"], binding["overrides"]
+        ):
+            if item["finish"] > local:
+                return item
+    return None
+
+
 def next_reminders(binding: dict, now: datetime, limit=5) -> list[dict]:
     local = now.astimezone(ZoneInfo(binding["timezone"]))
     # Full 60-week range also supports a far-future semester start.

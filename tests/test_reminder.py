@@ -388,6 +388,13 @@ def load_plugin_with_sdk_stubs():
         def __init__(self, qq):
             self.qq = qq
 
+    class Image:
+        @classmethod
+        def fromBytes(cls, data):
+            image = cls()
+            image.data = data
+            return image
+
     class File:
         def __init__(self, name, file=""):
             self.name, self.location = name, file
@@ -411,6 +418,7 @@ def load_plugin_with_sdk_stubs():
         EventMessageType=types.SimpleNamespace(ALL="all"),
     )
     modules["astrbot.api.message_components"].At = At
+    modules["astrbot.api.message_components"].Image = Image
     modules["astrbot.api.message_components"].Plain = Plain
     modules["astrbot.api.message_components"].File = File
     modules["astrbot.api.message_components"].Reply = Reply
@@ -429,7 +437,9 @@ class PluginContractTests(unittest.IsolatedAsyncioTestCase):
         self.main = load_plugin_with_sdk_stubs()
         self.context = PersonalityTests().make_context()
         self.context.send_message = AsyncMock(return_value=True)
-        self.plugin = self.main.ClassNote(self.context, {"use_llm_persona": False})
+        self.plugin = self.main.ClassNote(
+            self.context, {"use_llm_persona": False, "reminder_format": "text"}
+        )
         self.plugin.store = Store(":memory:")
         self.b = self.plugin.store.save(binding())
 
@@ -506,6 +516,67 @@ class PluginContractTests(unittest.IsolatedAsyncioTestCase):
         await self.plugin._send(self.b, self.upcoming(), preview=True)
         chain = self.context.send_message.call_args.args[1].chain
         self.assertEqual(chain[0].qq, self.b["sender"])
+
+    async def test_image_mode_delivers_real_png_and_personality_opener(self):
+        self.plugin.config["reminder_format"] = "image"
+        self.plugin.config["card_title"] = "吉林大学"
+        await self.plugin._send(self.b, self.upcoming(), preview=True)
+        chain = self.context.send_message.call_args.args[1].chain
+        self.assertIn("该准备去上课了", chain[0].text)
+        self.assertNotIn("大学化学", chain[0].text)
+        self.assertTrue(chain[1].data.startswith(b"\x89PNG"))
+
+    async def test_both_mode_keeps_facts_and_image(self):
+        self.plugin.config["reminder_format"] = "both"
+        await self.plugin._send(self.b, self.upcoming(), preview=True)
+        chain = self.context.send_message.call_args.args[1].chain
+        self.assertIn("大学化学", chain[0].text)
+        self.assertTrue(chain[1].data.startswith(b"\x89PNG"))
+
+    async def test_render_failure_delivers_complete_text_without_retry(self):
+        self.plugin.config["reminder_format"] = "image"
+        with patch.object(self.main, "render_course_card", side_effect=OSError("font")):
+            self.assertTrue(
+                await self.plugin._send(self.b, self.upcoming(), preview=True)
+            )
+        chain = self.context.send_message.call_args.args[1].chain
+        self.assertEqual(len(chain), 1)
+        for text in ("大学化学", "08:00", "09:40", "逸夫楼A201"):
+            self.assertIn(text, chain[0].text)
+
+    async def test_format_change_during_render_cancels_stale_send(self):
+        self.plugin.config["reminder_format"] = "image"
+
+        def changing(*args):
+            self.plugin.config["reminder_format"] = "text"
+            return b"image"
+
+        with patch.object(self.main, "render_course_card", side_effect=changing):
+            self.assertFalse(
+                await self.plugin._send(self.b, self.upcoming(), preview=True)
+            )
+        self.context.send_message.assert_not_awaited()
+
+    async def test_picture_command_uses_reply_instead_of_proactive_delivery(self):
+        event = types.SimpleNamespace(
+            unified_msg_origin=self.b["umo"],
+            get_sender_id=lambda: self.b["sender"],
+            get_message_str=lambda: "/课表 图片",
+            get_group_id=lambda: "",
+            is_admin=lambda: True,
+            stop_event=lambda: None,
+            chain_result=lambda chain: ("image", chain),
+            plain_result=lambda text: ("text", text),
+        )
+        self.plugin.http = object()
+        self.plugin.store.save({**self.b, "id": self.plugin._binding_id(event)})
+        with patch.object(
+            self.main, "current_or_next_course", return_value=self.upcoming()
+        ):
+            results = [result async for result in self.plugin.timetable(event)]
+        self.assertEqual(results[0][0], "image")
+        self.assertTrue(results[0][1][0].data.startswith(b"\x89PNG"))
+        self.context.send_message.assert_not_awaited()
 
     async def test_invalid_import_does_not_replace_existing(self):
         event = types.SimpleNamespace(
