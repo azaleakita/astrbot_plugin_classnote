@@ -139,6 +139,18 @@ async def verify(archive=None, previous_archive=None):
         await plugin.future_tasks.callback(**jobs[0].payload)
         await plugin.future_tasks.callback(**jobs[0].payload)
         context.send_message.assert_awaited_once()
+        import base64
+        from io import BytesIO
+
+        from astrbot.api.message_components import Image
+        from PIL import Image as PILImage
+
+        chain = context.send_message.call_args.args[1].chain
+        assert len(chain) == 2 and isinstance(chain[1], Image)
+        data = base64.b64decode(chain[1].file.removeprefix("base64://"))
+        with PILImage.open(BytesIO(data)) as card:
+            assert card.size == (1000, 430) and card.format == "PNG"
+            card.verify()
         assert plugin.store.delivery(jobs[0].payload["key"])["state"] == "sent"
         await plugin.future_tasks.sync()
         assert not await cron.list_jobs()

@@ -607,6 +607,25 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.plugin.dashboard.close()
         self.assertEqual(self.context.registered_web_apis, [])
 
+    async def test_card_settings_apply_to_existing_reminder_without_reimport(self):
+        self.payload({"reminder_format": "both", "card_title": "吉林大学"})
+        await self.dashboard.settings()
+        self.assertEqual(self.plugin.config["reminder_format"], "both")
+        self.assertEqual(self.plugin.config["card_title"], "吉林大学")
+        self.assertIsNotNone(self.plugin.store.get(self.b["id"]))
+
+    async def test_invalid_card_settings_leave_previous_config_intact(self):
+        before = dict(self.plugin.config)
+        for values in (
+            {"reminder_format": "html"},
+            {"card_title": ""},
+            {"card_title": "x" * 21},
+        ):
+            self.payload(values)
+            with self.assertRaises(TimetableError):
+                await self.dashboard.settings()
+            self.assertEqual(dict(self.plugin.config), before)
+
     async def test_foreign_task_cannot_be_modified(self):
         manager = NativeManager()
         manager.jobs["foreign"] = types.SimpleNamespace(job_id="foreign", payload={})
