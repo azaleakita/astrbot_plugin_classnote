@@ -33,6 +33,7 @@ from .future_tasks import FutureTasks
 from .ics import parse_calendar
 from .persona import generate_opener
 from .store import Store, migrate_legacy_database
+from .task_text import DEFAULT_REQUIREMENT, validate_requirement
 from .wakeup import import_share
 
 HELP = """课笺 · ClassNote
@@ -42,6 +43,7 @@ HELP = """课笺 · ClassNote
 /课表 状态 / 今日 / 明日 / 本周 / 下次
 /课表 提前 20 或 /课表 提前 30,10
 /课表 提前 日历（恢复使用ICS自带的提前提醒）
+/课表 提前 默认（跟随插件设置）
 /课表 开学 2026-09-07（第一教学周周一）
 /课表 停课 2026-10-01（当天全部课程）
 /课表 调课 2026-10-10 2026-10-05
@@ -56,7 +58,7 @@ WakeUp导入是课表快照，App后续修改需重新分享导入。"""
     "astrbot_plugin_classnote",
     "CREAM",
     "课笺：WakeUp日历与分享课表提醒，沿用当前会话人格",
-    "0.3.1",
+    "0.4.0",
 )
 class ClassNote(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -96,6 +98,10 @@ class ClassNote(Star):
         zone = str(self.config.get("timezone", "Asia/Shanghai"))
         ZoneInfo(zone)  # Invalid configuration must fail visibly at load time.
         self._lead(self.config.get("default_lead_minutes", [20]))
+        validate_requirement(
+            self.config.get("task_requirement_template", DEFAULT_REQUIREMENT),
+            template=True,
+        )
         bounded_int(self.config.get("catchup_seconds", 300), 30, 900, "补发窗口")
         if self.config.get("scheduler_mode", "future_tasks") not in (
             "future_tasks",
@@ -134,6 +140,21 @@ class ClassNote(Star):
             await self.future_tasks.sync(**options)
         except Exception as exc:
             logger.warning(f"[classnote] future task sync failed: {type(exc).__name__}")
+
+    async def _apply_binding_defaults(self):
+        """Refresh inherited settings, preserving explicit personal advance times."""
+        zone = str(self.config.get("timezone", "Asia/Shanghai"))
+        ZoneInfo(zone)
+        leads = self._lead(self.config.get("default_lead_minutes", [20]))
+        async with self.send_lock:
+            for binding in self.store.all():
+                updated = {**binding, "timezone": zone}
+                if binding["timezone"] != zone:
+                    updated.setdefault("key_timezone", binding["timezone"])
+                if not binding.get("custom_lead", False):
+                    updated["lead_minutes"] = leads
+                if updated != binding:
+                    self.store.save(updated)
 
     def _binding_id(self, event):
         return digest([event.unified_msg_origin, str(event.get_sender_id())])
@@ -314,7 +335,7 @@ class ClassNote(Star):
                 + date_info
                 + f"提醒：{'开启' if self._active(binding) else '暂停或配置已关闭'}；"
                 f"默认提前{binding['lead_minutes']}分钟；时区{binding['timezone']}\n"
-                f"提醒来源：{'日历自带，缺失时使用默认值' if calendar and not binding.get('custom_lead', False) else '插件设置'}\n"
+                f"提醒来源：{'日历自带，缺失时使用默认值' if calendar and binding.get('respect_ics_alarms', True) and not binding.get('custom_lead', False) else '个人提前量' if binding.get('custom_lead', False) else '全局默认设置'}\n"
                 f"最近投递：{latest}\n日期覆盖：{json.dumps(binding['overrides'], ensure_ascii=False)}"
                 + f"\n调度：{'AstrBot 未来任务' if self.future_tasks.effective_mode == 'future_tasks' else '插件轮询'}"
                 + (f"\n{self.future_tasks.error}" if self.future_tasks.error else "")
@@ -356,10 +377,17 @@ class ClassNote(Star):
             # Refresh inside the lock, so concurrent commands cannot overwrite each other.
             binding = self._get_binding(event)
             if action == "提前":
-                if argument.strip() == "日历":
+                if argument.strip() == "默认":
+                    binding["custom_lead"] = False
+                    binding["respect_ics_alarms"] = False
+                    binding["lead_minutes"] = self._lead(
+                        self.config.get("default_lead_minutes", [20])
+                    )
+                elif argument.strip() == "日历":
                     if binding["schedule"].get("kind") != "calendar":
                         raise TimetableError("当前不是日历课表，请先导入 .ics 文件。")
                     binding["custom_lead"] = False
+                    binding["respect_ics_alarms"] = True
                 else:
                     binding["lead_minutes"] = self._lead(argument)
                     binding["custom_lead"] = True
@@ -395,6 +423,7 @@ class ClassNote(Star):
         return "已更新。发送 /课表 下次 或 /课表 本周 可核对新安排。"
 
     async def _save_schedule(self, event, schedule):
+        await self._apply_binding_defaults()
         async with self.send_lock:
             previous = self.store.get(self._binding_id(event)) or {}
             binding = self.store.save(
@@ -412,8 +441,16 @@ class ClassNote(Star):
                         "lead_minutes",
                         self._lead(self.config.get("default_lead_minutes", [20])),
                     ),
+                    "key_timezone": previous.get(
+                        "key_timezone",
+                        previous.get(
+                            "timezone",
+                            str(self.config.get("timezone", "Asia/Shanghai")),
+                        ),
+                    ),
                     # Legacy bindings have no flag: treat their configured advance time as deliberate.
                     "custom_lead": previous.get("custom_lead", bool(previous)),
+                    "respect_ics_alarms": previous.get("respect_ics_alarms", True),
                     "enabled": previous.get("enabled", True),
                     "schedule": schedule,
                     "overrides": previous.get("overrides", {}),
@@ -428,7 +465,10 @@ class ClassNote(Star):
         unit = "课次" if calendar else "条排课"
         alarm = (
             "优先使用日历自带提前提醒，可用 /课表 提前 覆盖。"
-            if calendar and schedule.get("has_alarms") and not binding["custom_lead"]
+            if calendar
+            and schedule.get("has_alarms")
+            and binding.get("respect_ics_alarms", True)
+            and not binding["custom_lead"]
             else f"提前{','.join(map(str, binding['lead_minutes']))}分钟提醒。"
         )
         notice = "\n" + "\n".join(schedule["warnings"]) if schedule["warnings"] else ""
@@ -441,6 +481,11 @@ class ClassNote(Star):
         )
 
     async def _send(self, binding, item, preview=False):
+        settings = (
+            self.config.get("use_llm_persona", True),
+            self.config.get("fallback_opener"),
+            self.config.get("task_requirement_template"),
+        )
         fallback = clean(
             self.config.get("fallback_opener", "该准备去上课了，记得带齐需要的东西。"),
             100,
@@ -453,12 +498,19 @@ class ClassNote(Star):
                     binding,
                     fallback,
                     bool(self.config.get("use_llm_persona", True)),
+                    requirement=await self.future_tasks.requirement(binding, item),
                 )
         except Exception as exc:
             logger.warning(f"[classnote] persona fallback: {type(exc).__name__}")
             opener = fallback
         # Re-check after the await: pause/import/delete/override may have happened meanwhile.
         async with self.send_lock:
+            if settings != (
+                self.config.get("use_llm_persona", True),
+                self.config.get("fallback_opener"),
+                self.config.get("task_requirement_template"),
+            ):
+                return False
             live = self.store.get(binding["id"])
             if (
                 not live
@@ -536,6 +588,7 @@ class ClassNote(Star):
             try:
                 now = datetime.now(timezone.utc)
                 stamp = now.timestamp()
+                await self._apply_binding_defaults()
                 grace = bounded_int(
                     self.config.get("catchup_seconds", 300), 30, 900, "补发窗口"
                 )

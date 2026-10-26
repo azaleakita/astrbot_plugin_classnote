@@ -270,6 +270,16 @@ def reminder_leads(binding, occurrence):
     return binding["lead_minutes"]
 
 
+def reminder_key(binding, occurrence, minutes):
+    """Keep delivery identity stable when only the display timezone changes."""
+    zone = ZoneInfo(binding.get("key_timezone", binding["timezone"]))
+    return delivery_key(
+        binding["id"],
+        {**occurrence, "begin": occurrence["begin"].astimezone(zone)},
+        minutes,
+    )
+
+
 def due_reminders(binding: dict, now: datetime, grace_seconds=300) -> list[dict]:
     local = now.astimezone(ZoneInfo(binding["timezone"]))
     result = []
@@ -290,7 +300,7 @@ def due_reminders(binding: dict, now: datetime, grace_seconds=300) -> list[dict]
                             **item,
                             "fire": fire,
                             "lead": minutes,
-                            "key": delivery_key(binding["id"], item, minutes),
+                            "key": reminder_key(binding, item, minutes),
                         }
                     )
     return sorted(result, key=lambda x: (x["fire"], x["name"]))

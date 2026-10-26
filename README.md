@@ -1,7 +1,7 @@
 <p align="center"><img src="docs/assets/hero.svg" alt="课笺 ClassNote · 让每一次上课，都有一句温柔的提醒" width="100%" /></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.1-a58bc7?style=flat-square" alt="version 0.3.1" />
+  <img src="https://img.shields.io/badge/version-0.4.0-a58bc7?style=flat-square" alt="version 0.4.0" />
   <img src="https://img.shields.io/badge/AstrBot-%E2%89%A54.20-75629a?style=flat-square" alt="AstrBot >=4.20" />
   <img src="https://img.shields.io/badge/Python-3.11%2B-5a718b?style=flat-square" alt="Python 3.11+" />
   <img src="https://img.shields.io/badge/iCalendar-ICS-b38d9f?style=flat-square" alt="iCalendar ICS" />
@@ -64,6 +64,23 @@
 导入支持日历文件、分享文本和 WakeUp 备份；确认前会显示课次、范围、投递地与解析提示。页面通过 AstrBot 的 bridge 和认证接口通信，不存储 Dashboard 密码或令牌。管理员在页面中可以管理全部课表；QQ 指令仍按会话、发送者和插件权限隔离。
 
 详细操作与排查见 [可视化管理与未来任务](docs/WEBUI.md)。
+
+## 设置与任务需求实时同步 · v0.4.0
+
+在管理页“插件设置 → 熟悉的语气”编辑 **未来任务需求模板**，保存后自动同步已经排入的任务。修改默认提前量会重新安排未设置个人提前量的课表；时区更新同步已有课表，日历的绝对上课时刻保持不变。使用 AstrBot 自带插件配置入口时，保存并按该入口提示重载；课笺后台也会定期核对。
+
+模板支持 `{nickname}`、`{course}`、`{date}`、`{start}`、`{end}`、`{room}`、`{lead}`、`{timezone}`，最多 2000 字。例如：
+
+```text
+请沿用当前会话的人格，温柔提醒 {nickname} 准备出发，并提醒带上水杯。
+课程：{course}；{date} {start}–{end}；地点：{room}；提前 {lead} 分钟。
+```
+
+在“提醒计划”展开 **任务需求** 即可预览；点击 **编辑需求** 为这一条提醒填写独立文本（最多 4000 字），或勾选“恢复跟随全局模板”。AstrBot 原生“未来任务”里编辑任务需求也会被保留为单条自定义，后续全局模板变更不会覆盖它。
+
+需求会实际传入当前人格的生成提示，课程名、时间和地点仍由程序准确追加；关闭人格生成时使用备用开头。仅修改需求不更换任务 ID，保留暂停与删除状态。修改提前量会替换对应排期，不重发已成功的同一次提醒。
+
+提前量优先级：**个人自定义 → 日历闹钟 → 全局默认**。如需让曾经单独设置过的课表重新跟随全局，可在“课表总览 → 提醒设置”选择“跟随插件默认设置”，或发送 `/课表 提前 默认`。此选项可明确覆盖日历闹钟；`/课表 提前 日历` 恢复日历优先。
 
 ## 使用 AstrBot「未来任务」提醒
 
@@ -162,7 +179,7 @@ WakeUp Android/鸿蒙版导出日历默认带提前 20 分钟提醒。新订阅�
 
 文件上限 2 MiB，原始事件最多 2000 条，展开最多 10000 课次，整体跨度最多 550 天。只接收带精确起止时间的有限课程；全天事件、无限重复、小时/分钟级重复、无效时间和未知时区会明确拒绝。主要面向 `Asia/Shanghai`，夏令时切换未专项验证。
 
-当前 **79 项 Python 离线测试与 15 项页面交互测试通过**。新增真实 AstrBot **4.20.0、4.28.2、4.29.3** 集成测试：完整插件加载器、真实 SQLite、原生一次性任务创建、提醒回调去重与卸载清理均已通过；CI 持续执行同一矩阵。集成测试仅替换外部 QQ 发信，未在用户真实 QQ 实例和完整 AstrBot WebUI 中完成部署联调。页面交互测试使用 jsdom。
+当前 **88 项 Python 离线测试与 18 项页面交互测试通过**。新增真实 AstrBot **4.20.0、4.28.2、4.29.3** 集成测试：完整插件加载器、真实 SQLite、原生一次性任务创建、提醒回调去重与卸载清理均已通过；CI 持续执行同一矩阵。集成测试仅替换外部 QQ 发信，未在用户真实 QQ 实例和完整 AstrBot WebUI 中完成部署联调。页面交互测试使用 jsdom。
 
 ```bash
 # 在插件目录的父目录运行
